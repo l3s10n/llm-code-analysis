@@ -11,7 +11,7 @@ from typing import List, Optional
 # Add parent directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import get_config, is_verbose
+from common.config import load_config
 from .models import (
     FunctionNode,
     NodeTag,
@@ -56,9 +56,9 @@ class FunctionExplorer:
         self.vulnerability_paths: List[VulnerabilityPath] = []
 
         # Load configuration values
-        self.max_depth = get_config("exploration.max_depth", 20)
-        self.max_nodes = get_config("exploration.max_nodes", 1000)
-        self.verbose = is_verbose()
+        self.max_depth = load_config("exploration.max_depth")
+        self.max_nodes = load_config("exploration.max_nodes")
+        self.verbose = load_config("exploration.verbose")
         self.node_count = 0  # Track total nodes explored
 
     def initialize(self) -> bool:

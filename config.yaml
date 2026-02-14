@@ -3,9 +3,12 @@
 
 # LLM Configuration
 llm:
-  # Base url
   base_url: ""
-  # API key
   api_key: ""
-  # Model
   model: ""
+
+# Exploration settings
+exploration:
+  max_depth: 20
+  max_nodes: 1000
+  verbose: true
