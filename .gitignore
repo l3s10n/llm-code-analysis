@@ -1,0 +1,7 @@
+CLAUDE.md
+.vscode/
+.claude/
+.DS_Store
+__pycache__/
+temp/
+test/
