@@ -115,7 +115,7 @@ class FunctionExplorer:
         print(f"[Explorer] Call chain length: {len(call_chain)}")
 
         # Find next hops using the agent
-        next_hops: List[NextHopResult] = next_hop_agent(call_chain)
+        next_hops: List[NextHopResult] = next_hop_agent(self.target_path, call_chain)
 
         if not next_hops:
             print(f"[Explorer] No next hops found for node: {node.function_name}")
@@ -149,6 +149,7 @@ class FunctionExplorer:
         if interest_hops:
             interest_expressions = [ih.expression for ih in interest_hops]
             interest_infos: List[NextHopInfo] = interest_info_agent(
+                self.target_path,
                 call_chain,
                 interest_expressions
             )

@@ -10,6 +10,7 @@ import warnings
 from typing import Optional
 
 from claude_agent_sdk import query, ClaudeAgentOptions
+from claude_agent_sdk.types import StreamEvent
 
 from .config import load_config
 
@@ -70,7 +71,8 @@ def base_claude_agent(
             allowed_tools=allowed_tools,
             permission_mode="bypassPermissions",
             cwd=cwd,
-            model=model
+            model=model,
+            include_partial_messages=True
         )
 
         result = None
@@ -79,8 +81,22 @@ def base_claude_agent(
         try:
             # Consume all messages naturally (no early break)
             async for message in gen:
+                if isinstance(message, StreamEvent):
+                    event = message.event
+                    event_type = event.get("type")
+
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            print(delta.get("text", ""), end="", flush=True)
+
+                    if event_type == "content_block_start":
+                        content_block = event.get("content_block", {})
+                        if content_block.get("type") == "tool_use":
+                            current_tool = content_block.get("name")
+                            print(f"[Tool: {current_tool}]", flush=True)
+
                 if hasattr(message, "result"):
-                    print(message.result)
                     result = message.result
         finally:
             # Close the generator
