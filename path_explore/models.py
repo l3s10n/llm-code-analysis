@@ -88,7 +88,7 @@ class NextHopResult:
 @dataclass
 class NextHopInfo:
     """
-    Detailed information about a next hop function from interest_info_agent.
+    Detailed information about a next hop function from interest_info_find_agent.
 
     Attributes:
         function_name: Name of the function

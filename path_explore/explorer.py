@@ -23,7 +23,7 @@ from .models import (
 from .agents import (
     source_info_find_agent,
     next_hop_agent,
-    interest_info_agent
+    interest_info_find_agent
 )
 from .utils import (
     print_exploration_tree,
@@ -148,7 +148,7 @@ class FunctionExplorer:
         # Process interest nodes - need to find their implementations
         if interest_hops:
             interest_expressions = [ih.expression for ih in interest_hops]
-            interest_infos: List[NextHopInfo] = interest_info_agent(
+            interest_infos: List[NextHopInfo] = interest_info_find_agent(
                 self.target_path,
                 call_chain,
                 interest_expressions
@@ -316,8 +316,8 @@ class FunctionExplorer:
             if p.vulnerability_type == "CommandInjection"
         )
 
-        print(f"  - Path Traversal vulnerabilities: {path_traversal_count}")
-        print(f"  - Command Injection vulnerabilities: {command_injection_count}")
+        print(f"  - Potential Path Traversal vulnerabilities: {path_traversal_count}")
+        print(f"  - Potential Command Injection vulnerabilities: {command_injection_count}")
         print("=" * 60 + "\n")
 
     def export_results(self, output_path: str) -> None:
@@ -343,3 +343,58 @@ class FunctionExplorer:
         """
         results = [vp.to_dict() for vp in self.vulnerability_paths]
         return json.dumps(results, indent=2, ensure_ascii=False)
+
+
+# =============================================================================
+# CLI Entry Point
+# =============================================================================
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='GOLD MINER - Vulnerability Path Discovery Tool',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m path_explore.explorer ./testProject /api/readFile
+  python -m path_explore.explorer ./my-project /api/upload -o results.json
+        """
+    )
+
+    parser.add_argument(
+        'target_path',
+        type=str,
+        help='Path to the target project\'s source code'
+    )
+
+    parser.add_argument(
+        'target_endpoint',
+        type=str,
+        help='The API endpoint to analyze (e.g., /api/readFile)'
+    )
+
+    parser.add_argument(
+        '-o', '--output',
+        type=str,
+        default=None,
+        help='Output file path for JSON results (default: print to console)'
+    )
+
+    args = parser.parse_args()
+
+    # Create and run explorer
+    explorer = FunctionExplorer(
+        target_path=args.target_path,
+        target_endpoint=args.target_endpoint
+    )
+
+    # Run exploration
+    vulnerability_paths = explorer.run_exploration()
+
+    # Output results
+    if args.output:
+        explorer.export_results(args.output)
+    else:
+        print("\n[Results]")
+        print(explorer.get_results_json())

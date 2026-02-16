@@ -133,6 +133,130 @@ def _tag_string_to_enum(tag_str: str) -> Optional[NodeTag]:
     return tag_map.get(tag_str)
 
 
+def _extract_function_name(expression: str) -> Optional[str]:
+    """
+    Extract function name from a call expression.
+
+    Args:
+        expression: A call expression (e.g., "readFile(userInput)" or "FileUtils.readFile(path)").
+
+    Returns:
+        The function name (part after the last "." before "(" if "." exists,
+        otherwise the part before "("), or None if no "(" found.
+
+    Example:
+        >>> _extract_function_name("readFile(userInput)")
+        'readFile'
+        >>> _extract_function_name("FileUtils.readFile(path)")
+        'readFile'
+        >>> _extract_function_name("org.apache.commons.io.FileUtils.readFile(path)")
+        'readFile'
+        >>> _extract_function_name("noParens")
+        None
+    """
+    if "(" not in expression:
+        return None
+
+    # Get the part before the first "("
+    before_paren = expression.split("(")[0].strip()
+
+    # If there's a ".", get the part after the last "."
+    if "." in before_paren:
+        return before_paren.split(".")[-1].strip()
+
+    return before_paren
+
+
+def _is_function_in_code(function_name: str, source_code: str) -> bool:
+    """
+    Check if a function name appears in the source code.
+
+    Args:
+        function_name: The function name to search for.
+        source_code: The source code to search in.
+
+    Returns:
+        True if the function name is found in the source code, False otherwise.
+    """
+    if not function_name or not source_code:
+        return False
+    return function_name in source_code
+
+
+def _build_user_prompt(call_chain: List[FunctionNode]) -> str:
+    """
+    Build user prompt with call chain status and node details.
+
+    Args:
+        call_chain: List of FunctionNodes representing the call chain.
+
+    Returns:
+        Formatted user prompt string.
+    """
+    # Build call chain names, mark last node as current function
+    call_chain_names = []
+    for i, node in enumerate(call_chain):
+        if i == len(call_chain) - 1:
+            call_chain_names.append(f"{node.function_name} (current function)")
+        else:
+            call_chain_names.append(node.function_name)
+    call_chain_section = f"# Call Chain\n{' -> '.join(call_chain_names)}\n\n"
+
+    node_details = []
+    for i, node in enumerate(call_chain):
+        # Mark last node as current function
+        if i == len(call_chain) - 1:
+            node_details.append(f"## Node {i + 1}: {node.function_name} (current function)")
+        else:
+            node_details.append(f"## Node {i + 1}: {node.function_name}")
+        node_details.append(f"File: {node.file_path}")
+        node_details.append(f"Source Code:\n```\n{node.source_code}\n```")
+        node_details.append("")
+
+    reminder = "\n\nThis context only includes the implementation code of functions within the call chain. If more information is required, it can be obtained by reading the file referenced by the File parameter."
+
+    return call_chain_section + "\n".join(node_details) + reminder
+
+def _parse_function_info_blocks(text: str) -> List[dict]:
+    """
+    Parse function info blocks from interest_info_find_agent response.
+
+    Args:
+        text: The agent response text.
+
+    Returns:
+        List of dictionaries with 'file_path', 'function_name', and 'source_code' keys.
+    """
+    results = []
+
+    # Pattern to match function info blocks
+    pattern = rf"{re.escape('--- function info start ---')}(.*?){re.escape('--- function info end ---')}"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    for match in matches:
+        info = {}
+
+        # Extract file path
+        file_match = re.search(r'File:\s*(.+?)(?:\n|$)', match)
+        if file_match:
+            info['file_path'] = file_match.group(1).strip()
+
+        # Extract function name
+        func_match = re.search(r'Function:\s*(.+?)(?:\n|$)', match)
+        if func_match:
+            info['function_name'] = func_match.group(1).strip()
+
+        # Extract source code
+        code_match = re.search(r'--- code start ---\n(.*?)\n--- code end ---', match, re.DOTALL)
+        if code_match:
+            info['source_code'] = code_match.group(1)
+
+        # Only add if all fields are present
+        if 'file_path' in info and 'function_name' in info and 'source_code' in info:
+            results.append(info)
+
+    return results
+
 # =============================================================================
 # Source Info Find Agent
 # =============================================================================
@@ -162,7 +286,7 @@ Analyze the current project. Based on the interface name provided by the user, l
 # Important Rules
 
 * **Resolve to Impl**: Entry function should contain code. If the entry function is bound to an Interface or an abstract class in certain frameworks, locate its corresponding implementation as the entry function.
-* **Stop at Entry**: Please provide the information of the entry function directly, even if the entry function is very simple (e.g., it simply encapsulates certain Service layer methods, etc.). Do not provide the next-hop information.
+* **Stop at Entry**: Please provide the information of the entry function directly, even if the entry function is very simple (e.g., it simply encapsulates certain Service layer functions, etc.). Do not provide the next-hop information.
 * <file path> should be a relative path based on the project root directory.
 * <function name> should only contain the function name, excluding parameters and return values, for example: "getValue".
 * <function code> should be directly excerpted from the source file, including and only including the code of the entry function.
@@ -232,49 +356,43 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
 
 
 # =============================================================================
-# Next Hop Agent
+# Sink Next Hop Agent
 # =============================================================================
 
-# System prompt for next hop discovery
-_NEXT_HOP_SYSTEM_PROMPT = """
+# System prompt for sink discovery
+_SINK_NEXT_HOP_SYSTEM_PROMPT = """
 You are a security expert.
 
 # Task
 
-You should think from the perspective of a security engineer. Based on the last function in the call chain provided by the user (i.e., the current function), analyze the sink functions in the next hop and the next hops worth further exploration.
+Based on the last function in the call chain provided by the user (i.e., the current function), analyze the sink functions in the next hop.
 
-## sink
+## Sink Function Definition
 
 A sink function is defined as a function that meets the following conditions:
 
-1. Functional requirements: The function performs file operations (read, write, delete) / command execution, with no further filtering internally. Only functions containing the aforementioned logic meet the Functional requirements. Some auxiliary methods, such as those used to generate paths/commands or to validate paths/commands, are not sink functions.
-2. Data flow requirements: The path/command used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
+1. Basic requirements: The function must be the next hop of the current function.
+2. Functional requirements: The function performs file operations (read, write, delete) / command execution. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary functions, such as those used to generate paths/commands or to validate paths/commands, are not sink functions**.
+3. Origin requirements: The function must be implemented in an external dependency rather than within the current project. Only functions defined in third-party libraries or framework code (i.e., not implemented in the project's own source code) qualify as sink functions. Functions implemented locally within the project, even if they perform file operations (read, write, delete) / command execution, are excluded from consideration.
+4. Data flow requirements: The path/command used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
 
 For sink functions, they need to be labeled as `Sink(PathTraversal)` or `Sink(CommandInjection)` based on their type.
 
-## Next Hop Functions Worth Exploring
-
-A next hop function worth exploring is defined as a function that meets the following conditions:
-
-1. Functional requirements: From a security engineer's perspective, these functions are worth further analysis to determine whether their internal logic contains the aforementioned sinks.
-
-For next hop functions worth exploring, they need to be labeled as `Interest`.
-
 ## Output Format
 
-You may analyze in any format, but the end of your output must include a summary in the following format:
+Analyze strictly according to the steps in the Steps section, the end of your output must include a summary in the following format:
 
 ```plaintext
 --- function info start ---
 <Called expression>
 --- Separator ---
-<Sink(PathTraversal) / Sink(CommandInjection) / Interest>
+<Sink(PathTraversal) / Sink(CommandInjection)>
 --- function info end ---
 
 --- function info start ---
 <Called expression>
 --- Separator ---
-<Sink(PathTraversal) / Sink(CommandInjection) / Interest>
+<Sink(PathTraversal) / Sink(CommandInjection)>
 --- function info end ---
 
 ...
@@ -282,22 +400,25 @@ You may analyze in any format, but the end of your output must include a summary
 
 # Steps
 
-0. Clarify which function is the current function.
-1. Disregarding data flow requirements, list all potential Sinks and Interests that are called as next hops by the current function and meet the functional requirements.
-2. Analyze each of these potential Sinks individually to determine if they meet the data flow requirements.
-3. Summarize and output the results according to the format above.
+1. Clarify which function is the current function (last node in the call chain provided by user).
+2. list all potential sink functions that are called as next hops by the current function.
+3. Check whether these potential sink functions meet all the requirements:
+   3.1 Basic requirements: Ensure the function currently being analyzed is the next hop of the current function.
+   3.2 Functional requirements: Ensure the function performs file operations (read, write, delete) / command execution.
+   3.3 Origin requirements: Ensure the sink function is not implemented in the current project. If the sink function is an interface called by the current function, analyze whether its implementation class is implemented in the current project.
+   3.4 Data flow requirement: 
+    a) Determine how the sink function specifies the paths/commands for its operation. 
+    b) Whether the paths/commands come from the source's user input.
+4. Summarize and output the results according to the format above.
 
 # Important Rules
 
-* **Must be Next Hop**: For the call chain provided by the user, the Next Hop must be a function called by the current function. It is forbidden to provide any Sink or Interest function that is not a Next Hop!
-* **Stop at Next Hop**: Your goal is to identify what the next hop is. Conducting a deeper analysis of the next hop is not your task. Therefore, you do not need to perform an in-depth analysis of the next hop at this stage. This means:
-    a. If you believe a function performs file operations (read, write, delete) / command execution, but are unsure if it performs further filtering internally, you do not need to analyze further. You should directly label it as Interest.
-    b. If you believe a function is worth examining in detail to see if their internal logic contains the aforementioned sinks, you do not need to confirm whether it actually does. Directly label it as Interest.
+* **Must be Next Hop**: For the call chain provided by the user, the sink function must be a function called by the current function. It is forbidden to provide any sink function that is not a next hop!
+* **Stop at Next Hop**: Your goal is to identify the sink function directly called by the current function. Do not analyze deeper into the next hop's code to find additional sink functions.
 * **Data Flow Only**: The data flow requirement focuses only on the provenance of the data (i.e., from the source function's user input) and disregards any sanitization or filtering that may have been applied. You should faithfully analyze whether the data flow originates from source's user input. You do not need to concern yourself with whether security filtering occurred in the process; this is not your task.
-* Any file operations (read, write, delete) / command execution implemented by code not in the current project (e.g., provided by dependencies) can be directly assumed to have no internal filtering and can be considered sink points if it satisfies the data flow requirements.
 * Focus only on file operations (read, write, delete) / command execution. Do not concern yourself with other types of security risks.
 * <Called expression> should be taken directly from the source code of the current function, starting with the function name, e.g., getValue(temp.getPath()).
-* If the current node does not have any Sinks or Interests that meet the requirements, you do not need to return any function information in the summary.
+* If the current node does not have any Sinks that meet the requirements, do not return `--- function info start ---` or `--- function info end ---`.
 
 # Restrictions
 
@@ -305,13 +426,232 @@ You may analyze in any format, but the end of your output must include a summary
 """.strip()
 
 
+def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[NextHopResult]:
+    """
+    Find sink functions in the next hop of the current function.
+
+    This agent examines the current function (last in call_chain) to identify
+    sink functions that perform file/command operations with user-controlled input.
+
+    Args:
+        target_path: Path to the target project's source code.
+        call_chain: List of FunctionNodes representing the call chain from source
+                   to current function. The last node is the current function to analyze.
+
+    Returns:
+        List of NextHopResult objects containing:
+        - expression: The call expression (e.g., "readFile(userInput)")
+        - tag: NodeTag indicating Sink(PathTraversal) or Sink(CommandInjection)
+
+    Note:
+        Results are filtered to only include functions whose names appear in
+        the current function's source code.
+    """
+    if not call_chain:
+        print("[sink_next_hop_agent] Empty call chain provided")
+        return []
+
+    current_function = call_chain[-1]
+    print(f"[sink_next_hop_agent] Analyzing function: {current_function.function_name}")
+
+    # Build user prompt
+    user_prompt = _build_user_prompt(call_chain)
+
+    # Execute agent
+    result = base_claude_agent(
+        cwd=target_path,
+        system_prompt=_SINK_NEXT_HOP_SYSTEM_PROMPT,
+        user_prompt=user_prompt
+    )
+
+    if result is None:
+        print("[sink_next_hop_agent] Agent returned no result")
+        return []
+
+    # Parse response
+    function_info_list = _parse_function_info_sections(result)
+
+    # Convert to NextHopResult objects and filter by code presence
+    sink_results = []
+    for expression, tag_str in function_info_list:
+        tag = _tag_string_to_enum(tag_str)
+        if tag is not None:
+            # Extract function name and check if it exists in current function's code
+            function_name = _extract_function_name(expression)
+            if function_name and _is_function_in_code(function_name, current_function.source_code):
+                sink_results.append(NextHopResult(expression=expression, tag=tag))
+            else:
+                print(f"[sink_next_hop_agent] Filtered out result: {expression} (not found in code)")
+
+    print(f"[sink_next_hop_agent] Found {len(sink_results)} sink(s)")
+
+    return sink_results
+
+
+# =============================================================================
+# Interest Next Hop Agent
+# =============================================================================
+
+# System prompt for interest discovery
+_INTEREST_NEXT_HOP_SYSTEM_PROMPT = """
+You are a security expert.
+
+# Task
+
+Your task is to analyze the next hop functions based on the last function in the call chain provided by the user (i.e., the current function), and determine which ones are worth further exploration as interest functions in the current project.
+
+Interest functions are those that:
+
+1. Basic requirements: The next hop called by the current function.
+2. Inspection requirements: during security auditing, are worth deeply exploring their internal implementations to see if they call any sink functions.
+3. Origin requirements: Must be implemented within the current project, not sourced from dependencies.
+
+## Sink Function Definition
+
+A sink function is defined as a function that meets the following conditions:
+
+1. The function performs file operations (read, write, delete) / command execution, with no further filtering internally. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary methods, such as those used to generate paths/commands or to validate paths/commands, are not sink functions**.
+2. The path/command used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
+
+## Output Format
+
+Analyze strictly according to the steps in the Steps section, the end of your output must include a summary in the following format:
+
+```plaintext
+--- function info start ---
+<Called expression>
+--- Separator ---
+Interest
+--- function info end ---
+
+--- function info start ---
+<Called expression>
+--- Separator ---
+Interest
+--- function info end ---
+
+...
+```
+
+# Steps
+
+0. Clarify which function is the current function (last node in the call chain provided by user).
+1. list all potential interest functions that are called as next hops by the current function.
+2. Check whether these potential interest functions meet all the requirements:
+   2.1 Basic requirements: Ensure the function currently being analyzed is the next hop of the current function.
+   2.2 Inspection requirements: 
+    a) Exclude any functions that have been identified as sink functions (provided by the user) 
+    b) Exclude any functions that are unlikely to further call sink methods 
+    c) Keep those that may further call sink methods (including uncertain ones).
+   2.3 Origin requirements: Ensure the interest function is implemented in the current project. If the interest function is an interface called by the current function, analyze whether its implementation class is implemented in the current project. (Do not conduct in-depth analysis of the logic inside the interest function!!!—that is not your task.)
+3. Summarize and output the results according to the format above.
+
+# Important Rules
+
+* **Must be Next Hop**: For the call chain provided by the user, the interest function must be a function called by the current function. It is forbidden to provide any interest function that is not a next hop!
+* **Stop at Next Hop**: Your goal is to identify the interest function directly called by the current function. Do not analyze deeper into the next hop's code to find additional interest functions or verify whether a particular interest function actually calls a sink method.
+* Focus only on file operations (read, write, delete) / command execution. Do not concern yourself with other types of security risks.
+* <Called expression> should be taken directly from the source code of the current function, starting with the function name, e.g., getValue(temp.getPath()).
+* If the current node does not have any interest methods that meet the requirements, do not return `--- function info start ---` or `--- function info end ---`.
+
+# Restrictions
+
+* You are prohibited from performing any write operations.
+""".strip()
+
+
+def interest_next_hop_agent(
+    target_path: str,
+    call_chain: List[FunctionNode],
+    sink_function_names: List[str]
+) -> List[NextHopResult]:
+    """
+    Find interest functions in the next hop of the current function.
+
+    This agent examines the current function (last in call_chain) to identify
+    functions worth further exploration that are NOT already identified as sinks.
+
+    Args:
+        target_path: Path to the target project's source code.
+        call_chain: List of FunctionNodes representing the call chain from source
+                   to current function. The last node is the current function to analyze.
+        sink_function_names: List of function names that have already been identified as sinks.
+                           These will be excluded from the interest results.
+
+    Returns:
+        List of NextHopResult objects containing:
+        - expression: The call expression (e.g., "processFile(content)")
+        - tag: NodeTag.INTEREST
+    """
+    if not call_chain:
+        print("[interest_next_hop_agent] Empty call chain provided")
+        return []
+
+    current_function = call_chain[-1]
+    print(f"[interest_next_hop_agent] Analyzing function: {current_function.function_name}")
+    print(f"[interest_next_hop_agent] Sink functions to exclude: {sink_function_names}")
+
+    # Build user prompt with sink exclusion info
+    base_prompt = _build_user_prompt(call_chain)
+
+    # Add sink function exclusion information
+    if sink_function_names:
+        sink_info = f"\n# Sink Functions to Exclude\nThe following functions have already been identified as sinks. Do NOT include them in your results:\n"
+        for name in sink_function_names:
+            sink_info += f"- {name}\n"
+        user_prompt = base_prompt + sink_info
+    else:
+        user_prompt = base_prompt
+
+    # Execute agent
+    result = base_claude_agent(
+        cwd=target_path,
+        system_prompt=_INTEREST_NEXT_HOP_SYSTEM_PROMPT,
+        user_prompt=user_prompt
+    )
+
+    if result is None:
+        print("[interest_next_hop_agent] Agent returned no result")
+        return []
+
+    # Parse response
+    function_info_list = _parse_function_info_sections(result)
+
+    # Convert to NextHopResult objects and filter by code presence
+    interest_results = []
+    for expression, tag_str in function_info_list:
+        tag = _tag_string_to_enum(tag_str)
+        if tag == NodeTag.INTEREST:
+            # Extract function name
+            function_name = _extract_function_name(expression)
+
+            # Check if function exists in current function's code
+            if not function_name or not _is_function_in_code(function_name, current_function.source_code):
+                print(f"[interest_next_hop_agent] Filtered out result: {expression} (not found in code)")
+                continue
+
+            # Check if function is already identified as a sink
+            if function_name in sink_function_names:
+                print(f"[interest_next_hop_agent] Filtered out result: {expression} (is a sink function)")
+                continue
+
+            interest_results.append(NextHopResult(expression=expression, tag=tag))
+
+    print(f"[interest_next_hop_agent] Found {len(interest_results)} interest function(s)")
+
+    return interest_results
+
+
+# =============================================================================
+# Next Hop Agent (Public Interface)
+# =============================================================================
+
 def next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[NextHopResult]:
     """
     Analyze the next hop functions from the current function in the call chain.
 
-    This agent examines the current function (last in call_chain) to identify:
-    a) Functions that are direct file/command operations with user-controlled input (Sink)
-    b) Functions that may eventually lead to such operations (Interest)
+    This function internally calls sink_next_hop_agent first to find sink functions,
+    then calls interest_next_hop_agent to find interest functions (excluding sinks).
 
     Args:
         target_path: Path to the target project's source code.
@@ -338,50 +678,86 @@ def next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[Nex
     print(f"[next_hop_agent] Analyzing function: {current_function.function_name}")
     print(f"[next_hop_agent] Call chain length: {len(call_chain)}")
 
-    # Build user prompt with call chain status and node details
-    call_chain_names = " -> ".join([node.function_name for node in call_chain])
-    call_chain_section = f"# Call Chain\n{call_chain_names}\n\n"
+    # Step 1: Find sink functions
+    sink_results = sink_next_hop_agent(target_path, call_chain)
 
-    node_details = []
-    for i, node in enumerate(call_chain):
-        node_details.append(f"## Node {i + 1}: {node.function_name}")
-        node_details.append(f"File: {node.file_path}")
-        node_details.append(f"Source Code:\n```\n{node.source_code}\n```")
-        node_details.append("")
+    # Step 2: Extract sink function names for exclusion
+    sink_function_names = []
+    for result in sink_results:
+        function_name = _extract_function_name(result.expression)
+        if function_name:
+            sink_function_names.append(function_name)
 
-    user_prompt = call_chain_section + "\n".join(node_details)
+    # Step 3: Find interest functions (excluding sinks)
+    interest_results = interest_next_hop_agent(target_path, call_chain, sink_function_names)
 
-    # Execute agent
-    result = base_claude_agent(
-        cwd=target_path,
-        system_prompt=_NEXT_HOP_SYSTEM_PROMPT,
-        user_prompt=user_prompt
-    )
+    # Combine results
+    all_results = sink_results + interest_results
 
-    if result is None:
-        print("[next_hop_agent] Agent returned no result")
-        return []
+    print(f"[next_hop_agent] Total: {len(all_results)} next hop(s) ({len(sink_results)} sinks, {len(interest_results)} interests)")
 
-    # Parse response
-    function_info_list = _parse_function_info_sections(result)
-
-    # Convert to NextHopResult objects
-    next_hop_results = []
-    for expression, tag_str in function_info_list:
-        tag = _tag_string_to_enum(tag_str)
-        if tag is not None:
-            next_hop_results.append(NextHopResult(expression=expression, tag=tag))
-
-    print(f"[next_hop_agent] Found {len(next_hop_results)} next hop(s)")
-
-    return next_hop_results
+    return all_results
 
 
 # =============================================================================
-# Interest Info Agent
+# Interest Info Find Agent
 # =============================================================================
 
-def interest_info_agent(
+# System prompt for next hop info discovery
+_INTEREST_INFO_FIND_SYSTEM_PROMPT = """
+You are a code analysis expert.
+
+# Task
+
+Based on the call chain and next hop expressions provided by the user, locate the implementation of each next hop function. For each function, provide its file path, function name, and source code.
+
+## Key Concepts
+
+* **Call Chain**: A list of functions from source to current function. The LAST node in the call chain is the **current function**.
+* **Next Hop**: A function that is directly called by the current function. The next hop expressions provided by the user are extracted from the current function's source code.
+* **Your Goal**: Find the implementation of these next hop functions.
+
+## Output Format
+
+You may analyze in any format, but the end of your output must include a summary in the following format for EACH function found:
+
+```plaintext
+--- function info start ---
+File: <file path>
+Function: <function name>
+--- code start ---
+<function code>
+--- code end ---
+--- function info end ---
+
+--- function info start ---
+File: <file path>
+Function: <function name>
+--- code start ---
+<function code>
+--- code end ---
+--- function info end ---
+
+...
+```
+
+# Important Rules
+
+* **Resolve to Implementation**: If a next hop function is called through an interface or abstract class, you must find its actual implementation class(es). Do NOT return interface definitions - only return concrete implementations.
+* **Context-Aware Implementation Resolution**: When multiple implementations of an interface exist, analyze the current call chain context to determine which implementation(s) could actually be invoked. Only return implementations that could be reached in this specific call context, NOT all implementations globally.
+* **Multiple Implementations**: If multiple implementations could be invoked in the current context, return all of them (one function info block per implementation).
+* <file path> should be a relative path based on the project root directory.
+* <function name> should only contain the function name, excluding parameters and return values, for example: "readFile".
+* <function code> should be directly excerpted from the source file, including and only including the code of that function.
+* If there are comments above the function, they must be preserved.
+* If a function implementation cannot be found, do not output a function info block for that function.
+
+# Restrictions
+
+* You are prohibited from performing any write operations.
+""".strip()
+
+def interest_info_find_agent(
     target_path: str,
     call_chain: List[FunctionNode],
     interest_expressions: List[str]
@@ -410,24 +786,54 @@ def interest_info_agent(
         could be invoked in this call context, not just all implementations globally.
 
     Example:
-        >>> infos = interest_info_agent("./project", [source_node], ["fileService.read(path)"])
+        >>> infos = interest_info_find_agent("./project", [source_node], ["fileService.read(path)"])
         >>> for info in infos:
         ...     print(f"{info.function_name} in {info.file_path}")
         'read in ./services/FileServiceImpl.java'
         'read in ./services/SafeFileServiceImpl.java'
     """
-    # TODO: Implement actual agent logic using Claude Code SDK
-    # Current implementation is a placeholder
-
     if not call_chain or not interest_expressions:
-        print("[interest_info_agent] Empty call chain or expressions provided")
+        print("[interest_info_find_agent] Empty call chain or expressions provided")
         return []
 
     current_function = call_chain[-1]
-    print(f"[interest_info_agent] Finding implementations for {len(interest_expressions)} interest functions")
-    print(f"[interest_info_agent] Current function: {current_function.function_name}")
-    print(f"[interest_info_agent] Interest expressions: {interest_expressions}")
+    print(f"[interest_info_find_agent] Finding implementations for {len(interest_expressions)} next hop function(s)")
+    print(f"[interest_info_find_agent] Current function: {current_function.function_name}")
+    print(f"[interest_info_find_agent] Next hop expressions: {interest_expressions}")
 
-    # Placeholder return - actual implementation will analyze the codebase
-    # to find function implementations, handling interface resolution
-    return []
+    # Build user prompt with call chain and next hop expressions
+    base_prompt = _build_user_prompt(call_chain)
+
+    # Add next hop expressions to find
+    next_hop_section = "\n# Next Hops to Find\nThe following expressions are next hop functions called by the current function. Please find their implementations:\n"
+    for i, expr in enumerate(interest_expressions, 1):
+        next_hop_section += f"{i}. {expr}\n"
+
+    user_prompt = base_prompt + next_hop_section
+
+    # Execute agent
+    result = base_claude_agent(
+        cwd=target_path,
+        system_prompt=_INTEREST_INFO_FIND_SYSTEM_PROMPT,
+        user_prompt=user_prompt
+    )
+
+    if result is None:
+        print("[interest_info_find_agent] Agent returned no result")
+        return []
+
+    # Parse response
+    function_infos = _parse_function_info_blocks(result)
+
+    # Convert to NextHopInfo objects
+    next_hop_infos = []
+    for info in function_infos:
+        next_hop_infos.append(NextHopInfo(
+            function_name=info['function_name'],
+            file_path=info['file_path'],
+            source_code=info['source_code']
+        ))
+
+    print(f"[interest_info_find_agent] Found {len(next_hop_infos)} implementation(s)")
+
+    return next_hop_infos
