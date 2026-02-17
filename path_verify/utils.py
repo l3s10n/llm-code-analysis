@@ -152,10 +152,6 @@ def print_final_result(result: VerificationResult) -> None:
     if result.summary:
         print(f"\n  Summary: {result.summary}")
 
-    # Reasoning
-    if result.reasoning:
-        print(f"\n  Reasoning:\n    {result.reasoning}")
-
     # Dataflow summary
     if result.dataflow_records:
         print("\n  Dataflow Summary:")
@@ -207,7 +203,11 @@ def print_verification_summary(results: List[VerificationResult]) -> None:
         print("\n  Vulnerable Paths:")
         for r in results:
             if r.is_vulnerable:
-                print(f"    - {r.call_chain_display} ({r.vulnerability_type})")
+                # Build call chain display from path
+                names = [node.name for node in r.path]
+                names.append("sink")
+                call_chain = " -> ".join(names)
+                print(f"    - {call_chain} ({r.vulnerability_type})")
 
     print("\n" + "=" * 60)
 

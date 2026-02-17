@@ -179,10 +179,12 @@ class VerificationResult:
     """
     Final verification result for a potential vulnerability path.
 
+    Based on the explore module's output format with additional verification fields.
+
     Attributes:
-        vulnerability_type: Type of vulnerability being verified
-        sink_expression: The sink expression from the original path
-        call_chain_display: Formatted string of the call chain
+        vulnerability_type: Type of vulnerability being verified (maps to 'Type')
+        sink_expression: The sink expression from the original path (maps to 'SinkExpression')
+        path: List of PathNode from source to sink (maps to 'Path')
 
         is_vulnerable: Whether the path contains an exploitable vulnerability
         confidence: Confidence level (High, Medium, Low)
@@ -190,36 +192,57 @@ class VerificationResult:
 
         dataflow_records: List of dataflow analysis records for each node
         filter_logics: List of filtering logics found during analysis
-
-        reasoning: Detailed reasoning for the final decision
     """
-    vulnerability_type: str
-    sink_expression: str
-    call_chain_display: str
+    # Fields from explore module output
+    vulnerability_type: str  # Maps to 'Type'
+    sink_expression: str     # Maps to 'SinkExpression'
+    path: List[PathNode] = field(default_factory=list)  # Maps to 'Path'
 
+    # Verification result fields
     is_vulnerable: bool = False
     confidence: str = "Low"
     summary: str = ""
 
+    # Analysis details
     dataflow_records: List[NodeDataflowRecord] = field(default_factory=list)
     filter_logics: List[FilterLogic] = field(default_factory=list)
-
-    reasoning: str = ""
 
     def to_dict(self) -> dict:
         """
         Convert to dictionary for JSON serialization.
 
+        Output format is based on explore module's output with additional fields:
+        {
+            "Type": "PathTraversal",
+            "SinkExpression": "...",
+            "Path": [...],
+            "IsVulnerable": true/false,
+            "Confidence": "High/Medium/Low",
+            "Summary": "...",
+            "DataflowAnalysis": [...],
+            "FilterLogics": [...]
+        }
+
         Returns:
             Dictionary representation suitable for JSON export
         """
         return {
-            "VulnerabilityType": self.vulnerability_type,
+            # Fields from explore module output
+            "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
-            "CallChain": self.call_chain_display,
+            "Path": [
+                {
+                    "file": node.file,
+                    "name": node.name,
+                    "source_code": node.source_code
+                }
+                for node in self.path
+            ],
+            # Verification result fields
             "IsVulnerable": self.is_vulnerable,
             "Confidence": self.confidence,
             "Summary": self.summary,
+            # Analysis details
             "DataflowAnalysis": [
                 {
                     "NodeIndex": record.node_index,
@@ -238,6 +261,5 @@ class VerificationResult:
                             if logic.line_range else "Unknown"
                 }
                 for logic in self.filter_logics
-            ],
-            "Reasoning": self.reasoning
+            ]
         }

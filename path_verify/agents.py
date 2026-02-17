@@ -170,61 +170,60 @@ Source Code:
 
 # System prompt for dataflow analysis
 _ONE_HOP_DATAFLOW_SYSTEM_PROMPT = """
-You are a security expert specializing in data flow analysis.
+You are a security expert specializing in precise data flow analysis.
 
 # Task
 
-Analyze the data flow from the current function to the sink, determining which parameters and member variables of the current function flow to the sink's key semantics (path for PathTraversal, command for CommandInjection).
+Analyze the data flow from the current function to the next function (or directly to sink), determining which **specific fields** of parameters and member variables of the current function flow to the sink's key semantics.
 
-# Important Concepts
+# Key Concepts
 
-* **Current Function**: The function you are analyzing, which calls the next function in the chain.
-* **Next Function**: The function that is directly called by the current function, leading eventually to the sink.
-* **Sink Semantics**: The critical data that determines the security impact:
-  - For PathTraversal: The file path being accessed
-  - For CommandInjection: The command being executed
-
-# Input Format
-
-You will receive:
-1. The vulnerability type (PathTraversal or CommandInjection)
-2. The sink expression
-3. The call chain with function names
-4. Information about what in the next function flows to sink semantics (from previous analysis)
-5. Source code of current function and next function
+* **Sink Semantics**: The critical data that determines the security impact - this refers to the INPUT (parameter or member variable) that carries the path/command semantic, not a parameter named "path" or "command":
+  - For PathTraversal: The input that determines the file path being accessed
+  - For CommandInjection: The input that determines the command being executed
+* **Precise Field Tracking**: You must trace data flow to the most granular field level possible, not just parameter/member names.
 
 # Output Format
 
-Analyze the data flow and output your findings in this format:
+First, provide your analysis. Then, at the END of your response, provide a summary in this EXACT format:
 
 ```plaintext
 --- parameters start ---
-<parameter1>
-<parameter2>
+<param.subfield1.subfield2>
+<param2.nestedField>
 --- parameters end ---
 
 --- member variables start ---
-<memberVariable1>
-<memberVariable2>
+<this.member.nestedField.deepField>
+<this.anotherMember>
 --- member variables end ---
 ```
 
 If there are no parameters or member variables that flow to sink semantics, write "None" in that section.
 
-# Parameter/Member Variable Format
+# Format Requirements (CRITICAL)
 
-Use the following format for each item:
-- For parameters: `paramName` or `paramName.field.subfield` if accessing nested fields
-- For member variables: `this.memberName` or `this.memberName.field.subfield`
-- For static methods, you can ignore member variables
+* **Be Granular**: Always trace to the deepest field level that flows to sink semantics.
+  - Good: `request.path`, `user.profile.homeDir`, `config.basePath.prefix`
+  - Bad: `request`, `user`, `config` (too coarse-grained)
+* **Parameter Format**: `<paramName>.<field>.<field>.<field>` - trace through all nested accesses
+* **Member Variable Format**: `this.<memberName>.<field>.<field>.<field>` - include `this.` prefix
+* **For Static Methods**: Member variables are not applicable, focus only on parameters
+
+# Analysis Approach
+
+1. **Check Known Dataflow First**: The input provides information about what specific fields in the next function (or sink) flows to sink semantics. Your analysis should be completed based on this information.
+2. **Trace Backwards**: Starting from those fields in the next function, trace back through the current function's code to find which specific fields of the current function's parameters/member variables provide that data.
+3. **Follow Field Accesses**: When you see code like `param.getField().getSubField()`, the dataflow is `param.field.subField`, not just `param`.
+4. **Read Necessary Code**: You may need to read specific files to understand function implementations, class member variables, etc., to confirm how data is propagated or to be granular.
+5. **Handle Transformations**: Even if data is transformed (e.g., `param.getPath()` becomes `Paths.get(path)`), trace the original source field.
 
 # Important Rules
 
-* **Focus on Current -> Next**: Only analyze how the current function's inputs flow to the next function's inputs. Do not re-verify next -> ... -> sink.
-* **Data Flow Only**: Track where data comes from. Do not consider security filtering or sanitization.
-* **Complete Tracing**: Trace all paths from the current function's inputs to the identified inputs of the next function.
-* **Be Precise**: Only list parameters and member variables that actually flow to sink semantics.
-* **Edge Case for Sink**: If the current function is directly the sink's caller (last hop before sink), analyze what in it flows to the sink's key parameter.
+* **Data Flow Only**: Track where data comes from. Do NOT consider security filtering or sanitization.
+* **Be Precise**: Only list the specific fields that actually flow to sink semantics.
+* **Match the Target**: Your output should map to the known dataflow from the next function to sink.
+* **Scope Limited**: The specific fields in result must be parameters or member variables of the current function. Do not return anything that is not a parameter or member variable of the current function.
 
 # Restrictions
 
@@ -272,29 +271,38 @@ def one_hop_dataflow_agent(
     update_agent("one_hop_dataflow_agent", "running", f"Analyzing: {current_node.name} ({position_info})")
     log_info("one_hop_dataflow_agent", f"Analyzing dataflow for: {current_node.name}")
 
-    # Build the call chain display
-    call_chain_display = _build_call_chain_display(path.path)
-
-    # Mark current position in the chain
-    chain_parts = call_chain_display.split(" -> ")
-    chain_parts[node_index] = f"{current_node.name} (current)"
-    if node_index + 1 < len(chain_parts):
-        chain_parts[node_index + 1] = f"{path.path[node_index + 1].name if node_index + 1 < len(path.path) else 'sink'} (next)" if not is_last_node else "sink"
-    current_chain_display = " -> ".join(chain_parts)
+    # Build call chain from current node to sink only
+    remaining_chain = [node.name for node in path.path[node_index:]]
+    remaining_chain.append("sink")
+    call_chain_to_sink = " -> ".join(remaining_chain)
 
     # Build user prompt
-    user_prompt = f"""# Analysis Context
+    # Build the base prompt - Sink Expression only shown when next hop is sink
+    if is_last_node:
+        user_prompt = f"""# Analysis Context
 
 **Vulnerability Type**: {path.vulnerability_type}
 **Sink Expression**: {path.sink_expression}
 
-## Current Call Chain
-{current_chain_display}
+## Call Chain (from current to sink)
+{call_chain_to_sink}
 
-## Full Call Chain
-{call_chain_display}
+## Current Function - `{current_node.name}`
+File: {current_node.file}
+Source Code:
+```
+{current_node.source_code}
+```
+"""
+    else:
+        user_prompt = f"""# Analysis Context
 
-## Current Function - `{current_node.name}` (Node {node_index})
+**Vulnerability Type**: {path.vulnerability_type}
+
+## Call Chain (from current to sink)
+{call_chain_to_sink}
+
+## Current Function - `{current_node.name}`
 File: {current_node.file}
 Source Code:
 ```
@@ -306,34 +314,74 @@ Source Code:
     if not is_last_node:
         next_node = path.path[node_index + 1]
         user_prompt += f"""
-## Next Function - `{next_node.name}` (Node {node_index + 1})
+## Next Function - `{next_node.name}`
 File: {next_node.file}
 Source Code:
 ```
 {next_node.source_code}
 ```
 """
-        # Add dataflow info from next node's analysis
+        # Add dataflow info from next node's analysis - make this prominent
         if next_node_dataflow:
+            params_str = '\n'.join([f"  - {p}" for p in next_node_dataflow.parameters]) if next_node_dataflow.parameters else "  (None)"
+            members_str = '\n'.join([f"  - {m}" for m in next_node_dataflow.member_variables]) if next_node_dataflow.member_variables else "  (None)"
+
+            # Build member variable hint if there are member variables
+            member_hint = ""
+            if next_node_dataflow.member_variables:
+                member_hint = f"""
+**Note on `this` reference:** The `this` in the member variables above refers to the instance of {next_node.name}.
+In `{current_node.name}`'s code, identify what object this instance corresponds to:
+  - If called as xxx.{next_node.name}(...), then xxx is the instance of {next_node.name}
+  - If called as this.{next_node.name}(...) or directly {next_node.name}(...), then {current_node.name} and {next_node.name} share the same this instance (e.g., methods in the same class)
+You need to determine in {current_node.name}'s code exactly which object corresponds to this of {next_node.name}.
+"""
+
             user_prompt += f"""
-## What in `{next_node.name}` Flows to Sink Semantics
-From previous analysis, the following in `{next_node.name}` flow to sink semantics:
-- Parameters: {', '.join(next_node_dataflow.parameters) if next_node_dataflow.parameters else 'None'}
-- Member Variables: {', '.join(next_node_dataflow.member_variables) if next_node_dataflow.member_variables else 'None'}
+## *** CRITICAL: Known Dataflow from `{next_node.name}` (Next Function) to Sink ***
+
+The following fields in `{next_node.name}` have been confirmed to flow to the sink's key semantics.
+Your task is to find which specific fields in `{current_node.name}` flow into THESE fields:
+
+**Parameters in `{next_node.name}` that reach sink:**
+{params_str}
+
+**Member Variables in `{next_node.name}` that reach sink:**
+{members_str}
+{member_hint}
+
+The overall dataflow path is: 
+
+{current_node.name}.??? -> {next_node.name}.above_fields -> ... -> sink.
+
+Your task is to trace the first part of this path: 
+
+{current_node.name}.??? -> {next_node.name}.above_fields
+"""
+        else:
+            user_prompt += f"""
+## Known Dataflow from `{next_node.name}` to Sink
+
+(No specific dataflow information available)
 """
     else:
         # This is the last node - directly analyze what flows to sink
         user_prompt += f"""
-## Sink Information
+## *** Sink Direct Caller ***
+
 This function directly calls the sink: `{path.sink_expression}`
-Analyze which parameters and member variables of `{current_node.name}` flow to the sink's key semantics (path/command).
+
+Your task is to find which specific fields in `{current_node.name}` flow to the sink's key semantic input (the data that determines the path/command, which could be a parameter or member variable of the sink).
+
+>>> For PathTraversal: trace which fields become the file path semantic
+>>> For CommandInjection: trace which fields become the command semantic
 """
 
     user_prompt += f"""
 # Your Task
 
-Analyze the data flow and determine which parameters and member variables of `{current_node.name}` flow to the sink's key semantics.
-Output your findings in the specified format.
+Trace the data flow from `{current_node.name}` to the known sink-bound fields listed above.
+Output the specific fields (param.field.subfield or this.member.field.subfield) that flow to sink.
 """
 
     # Clear stream buffer and execute agent with streaming
@@ -374,41 +422,33 @@ Output your findings in the specified format.
 
 # System prompt for filter analysis
 _ONE_HOP_FILTER_SYSTEM_PROMPT = """
-You are a security expert specializing in vulnerability analysis.
+You are a security expert specializing in vulnerability exploitation analysis.
 
 # Task
 
-Analyze the code in the current function (the calling function) to identify any filtering or sanitization logic that could prevent the vulnerability from being exploited.
+Given a known data flow from current function to next function (or directly to sink), analyze whether there exists any logic that could prevent the vulnerability from being exploited, regardless of whether that logic was designed for security purposes or not.
 
-# Input Format
+# Background Context
 
-You will receive:
-1. The vulnerability type (PathTraversal or CommandInjection)
-2. The data flow information (which inputs of the current function flow to the sink)
-3. Source code of the current function (the calling function) - ANALYZE THIS
-4. Source code of the next function (the called function) - FOR REFERENCE ONLY
+You will be given:
+1. **Source fields in current function**: Specific fields (parameters/member variables) that flow to sink
+2. **Target fields in next function**: Specific fields (parameters/member variables) that receive the data and eventually flow to sink
+3. The source code of current function - THIS IS WHAT YOU ANALYZE
 
-# Important Concepts
-
-* **Current Function Analysis**: Focus ONLY on the code in the current function before and during the call to the next function.
-* **Filter Logic**: Any code that could:
-  - Validate or sanitize the input
-  - Restrict the range of acceptable values
-  - Transform the input in a way that prevents exploitation
-  - Check conditions that might prevent the vulnerable path from being reached
+Your job is to examine the code path from source fields to target fields and identify any logic that could prevent exploitation.
 
 # Output Format
 
-For EACH filtering logic found, output:
+First, provide your analysis. Then, at the END of your response, provide a summary for EACH logic found (or a single "no logic found" entry):
 
 ```plaintext
 --- filter logic start ---
 --- dataflow start ---
-<currentFunction.field -> nextFunction.field>
+<sourceField -> targetField>
 --- dataflow end ---
 
 --- description start ---
-<What the filter does and how it might prevent exploitation>
+<What the logic does and how it might prevent exploitation>
 --- description end ---
 
 --- file start ---
@@ -421,7 +461,11 @@ For EACH filtering logic found, output:
 --- filter logic end ---
 ```
 
-If no filtering logic is found that could prevent exploitation, output:
+**IMPORTANT**: The `<sourceField -> targetField>` must use the EXACT field names provided in the input:
+- `sourceField` must be one of the source fields listed for current function
+- `targetField` must be one of the target fields listed for next function (or "sink" if direct call)
+
+If no logic is found that could prevent exploitation, output:
 
 ```plaintext
 --- filter logic start ---
@@ -430,7 +474,7 @@ None
 --- dataflow end ---
 
 --- description start ---
-No filtering logic found
+No blocking logic found
 --- description end ---
 
 --- file start ---
@@ -443,13 +487,40 @@ None
 --- filter logic end ---
 ```
 
+# What Could Prevent Exploitation (Not Limited to Security Logic)
+
+Look for ANY logic that could make the vulnerability unexploitable, including but NOT limited to:
+
+1. **Security-specific logic** (designed for security):
+   - Input validation/sanitization
+   - Path traversal detection
+   - Command blacklist/whitelist
+
+2. **Business logic that may incidentally blocks exploitation**:
+   - Data transformation/formatting that changes the value
+   - String operations (concatenation, replacement, encoding)
+   - Type conversions that alter the data
+   - Default values or constants being prepended/appended
+   - Conditional branches that skip the vulnerable path
+   - Exception handling that prevents reaching the sink
+   - Configuration or environment checks
+   - Any other logic that affects the data flow
+
+3. **Data flow disruptions**:
+   - The data being combined with other fixed values
+   - The data being truncated or modified
+   - The vulnerable code path being conditionally unreachable
+
+**KEY POINT**: Do NOT only look for "security filters". Many vulnerabilities become unexploitable due to ordinary business logic that was never designed with security in mind. Report ALL logic that could prevent exploitation.
+
 # Important Rules
 
-* **Scope Limitation**: Only analyze the current function's code. The next function's code is provided for reference only - do not analyze its internal logic.
-* **Call Site Focus**: Focus on code before the call to the next function and at the call site itself.
-* **Relevance**: Only report filters that affect the data flow from the current function to the next function.
-* **Be Specific**: Provide exact file paths and line numbers when possible.
-* **Conservative Approach**: When in doubt, include potential filters rather than exclude them.
+* **Scope**: Only analyze the current function's code. Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find blocking logic in the current function, before the call to the next function.
+* **Relevance**: Only report logic that affects the specified source-to-target data flow.
+* **Be Specific**: Provide exact file paths and line numbers.
+* **Comprehensive**: Consider ALL types of logic, not just security-related ones.
+* **Conservative**: When uncertain if something could prevent exploitation, include it.
+* **Read When Needed**: If understanding the data flow requires reading other files, read them. Do not guess or assume.
 
 # Restrictions
 
@@ -461,25 +532,26 @@ def one_hop_filter_agent(
     target_path: str,
     path: PotentialPath,
     node_index: int,
-    x_dataflow: DataflowInfo,
-    y_dataflow: Optional[DataflowInfo] = None
+    current_dataflow: DataflowInfo,
+    next_dataflow: Optional[DataflowInfo] = None
 ) -> List[FilterLogic]:
     """
     Analyze filtering logic between two adjacent nodes.
 
-    This agent analyzes the code in the current node to find any filtering
-    logic that could prevent exploitation between it and the next node.
+    This agent analyzes the code in the current node to find any logic
+    (security-related or not) that could prevent exploitation in the
+    data flow from current function's fields to next function's fields.
 
     Args:
         target_path: Path to the target project's source code.
         path: PotentialPath containing the call chain.
         node_index: Index of the current node being analyzed (0-based).
-        x_dataflow: DataflowInfo for current node (what flows to sink).
-        y_dataflow: DataflowInfo for next node (what flows to sink).
-                   For the sink's direct caller, this is None.
+        current_dataflow: DataflowInfo for current node (which fields flow to sink).
+        next_dataflow: DataflowInfo for next node (which fields flow to sink).
+                      For the sink's direct caller, this is None.
 
     Returns:
-        List of FilterLogic objects representing potential filters found.
+        List of FilterLogic objects representing potential blocking logic found.
     """
     if node_index < 0 or node_index >= len(path.path):
         log_error("one_hop_filter_agent", f"Invalid node_index: {node_index}")
@@ -497,61 +569,124 @@ def one_hop_filter_agent(
         next_node = path.path[node_index + 1]
         position_info = f"{current_node.name} -> {next_node.name}"
     update_agent("one_hop_filter_agent", "running", f"Analyzing: {position_info}")
-    log_info("one_hop_filter_agent", f"Analyzing filters in: {current_node.name}")
+    log_info("one_hop_filter_agent", f"Analyzing logic in: {current_node.name}")
+
+    # Build source fields strings (separate parameters and member variables)
+    source_params_str = '\n'.join([f"  - {p}" for p in current_dataflow.parameters]) if current_dataflow.parameters else "  (None)"
+    source_members_str = '\n'.join([f"  - {m}" for m in current_dataflow.member_variables]) if current_dataflow.member_variables else "  (None)"
 
     # Build user prompt
-    user_prompt = f"""# Analysis Context
+    if is_last_node:
+        # Direct call to sink
+        user_prompt = f"""# Analysis Context
 
 **Vulnerability Type**: {path.vulnerability_type}
-**Sink Expression**: {path.sink_expression}
 
-## Current Analysis: `{current_node.name}` -> `{'sink' if is_last_node else path.path[node_index + 1].name}`
+## Data Flow to Analyze
 
-You are analyzing `{current_node.name}` and its call to the `{'sink' if is_last_node else path.path[node_index + 1].name}`.
+The following fields in `{current_node.name}` have been confirmed to flow to the sink `{path.sink_expression}`:
 
-## Data Flow Information
+**Source Fields (in `{current_node.name}`):**
 
-The following in `{current_node.name}` flow to the sink's key semantics:
-- Parameters: {', '.join(x_dataflow.parameters) if x_dataflow.parameters else 'None'}
-- Member Variables: {', '.join(x_dataflow.member_variables) if x_dataflow.member_variables else 'None'}
+Parameters:
+{source_params_str}
 
-## Current Function - `{current_node.name}` (Source Code to Analyze)
+Member Variables:
+{source_members_str}
+
+**Target:** sink (the input carrying the path/command semantic, which could be a parameter or member variable)
+
+## Current Function - `{current_node.name}`
 File: {current_node.file}
 Source Code:
 ```
 {current_node.source_code}
 ```
+
+# Your Task
+
+Analyze the code in `{current_node.name}` to find ANY logic that could prevent the vulnerability from being exploited.
+
+**Do NOT limit your analysis to security-specific code.** Look for ALL logic that could block exploitation, including:
+- Security validation/sanitization (if any)
+- Business logic that transforms or restricts the data
+- Conditional branches that might skip the sink call
+- Data operations that change the value
+- Any other logic affecting the data flow
+
+Output your findings in the specified format. The dataflow in output should be: `<sourceField -> sink>`
+"""
+    else:
+        next_node = path.path[node_index + 1]
+
+        # Build target fields strings (separate parameters and member variables)
+        target_params_str = '\n'.join([f"  - {p}" for p in next_dataflow.parameters]) if next_dataflow and next_dataflow.parameters else "  (None)"
+        target_members_str = '\n'.join([f"  - {m}" for m in next_dataflow.member_variables]) if next_dataflow and next_dataflow.member_variables else "  (None)"
+
+        # Build member variable hint if there are member variables in target
+        member_hint = ""
+        if next_dataflow and next_dataflow.member_variables:
+            member_hint = f"""
+**Note on `this` reference:** The `this` in the member variables above refers to the instance of {next_node.name}.
+In `{current_node.name}`'s code, identify what object this instance corresponds to:
+  - If called as xxx.{next_node.name}(...), then xxx is the instance of {next_node.name}
+  - If called as this.{next_node.name}(...) or directly {next_node.name}(...), then {current_node.name} and {next_node.name} share the same this instance (e.g., methods in the same class)
+You need to determine in {current_node.name}'s code exactly which object corresponds to this of {next_node.name}.
 """
 
-    # Add next function info if not the last node
-    if not is_last_node:
-        next_node = path.path[node_index + 1]
-        user_prompt += f"""
-## Next Function - `{next_node.name}` (Reference Only - Do Not Analyze Internals)
+        user_prompt = f"""# Analysis Context
+
+**Vulnerability Type**: {path.vulnerability_type}
+
+## *** CRITICAL: Known Data Flow ***
+
+The following data flow has been confirmed through previous analysis:
+
+**Source Fields (in `{current_node.name}`) that flow to sink:**
+
+Parameters:
+{source_params_str}
+
+Member Variables:
+{source_members_str}
+
+**Target Fields (in `{next_node.name}`) that receive the data and eventually flow to sink:**
+
+Parameters:
+{target_params_str}
+
+Member Variables:
+{target_members_str}
+{member_hint}
+This means: `{current_node.name}`.sourceFields -> `{next_node.name}`.targetFields -> ... -> sink
+
+## Current Function - `{current_node.name}` (Analyze This)
+File: {current_node.file}
+Source Code:
+```
+{current_node.source_code}
+```
+
+## Next Function - `{next_node.name}` (Reference Only)
 File: {next_node.file}
 Source Code:
 ```
 {next_node.source_code}
 ```
-"""
-        if y_dataflow:
-            user_prompt += f"""
-Note: The following in `{next_node.name}` were identified as flowing to sink:
-- Parameters: {', '.join(y_dataflow.parameters) if y_dataflow.parameters else 'None'}
-- Member Variables: {', '.join(y_dataflow.member_variables) if y_dataflow.member_variables else 'None'}
-"""
-    else:
-        user_prompt += """
-## Note
-This function directly calls the sink. Analyze the code for any filtering before the sink call.
-"""
 
-    user_prompt += f"""
 # Your Task
 
-Analyze the code in `{current_node.name}` to find any filtering or sanitization logic that could prevent exploitation.
-Focus on the data flow identified above.
-Output your findings in the specified format.
+Analyze the code in `{current_node.name}` to find ANY logic that could prevent the vulnerability from being exploited.
+
+**Do NOT limit your analysis to security-specific code.** Look for ALL logic that could block exploitation, including:
+- Security validation/sanitization (if any)
+- Business logic that transforms or restricts the data before passing to `{next_node.name}`
+- Conditional branches that might skip the call to `{next_node.name}`
+- Data operations (concatenation, encoding, transformation) that change the value
+- Any other logic affecting the source-to-target data flow
+
+Output your findings in the specified format. The dataflow in output should be: `<sourceField -> targetField>`
+where sourceField is from the source fields list and targetField is from the target fields list.
 """
 
     # Clear stream buffer and execute agent with streaming
@@ -572,8 +707,8 @@ Output your findings in the specified format.
     # Parse filter logic blocks
     filter_logics = _parse_filter_logics(result)
 
-    update_agent("one_hop_filter_agent", "completed", f"Found {len(filter_logics)} filter(s)")
-    log_success("one_hop_filter_agent", f"Found {len(filter_logics)} filtering logic")
+    update_agent("one_hop_filter_agent", "completed", f"Found {len(filter_logics)} blocking logic")
+    log_success("one_hop_filter_agent", f"Found {len(filter_logics)} blocking logic")
 
     return filter_logics
 
@@ -622,23 +757,35 @@ def _parse_filter_logics(text: str) -> List[FilterLogic]:
 
 # System prompt for final decision
 _FINAL_DECISION_SYSTEM_PROMPT = """
-You are a senior security expert making the final determination on whether a vulnerability is exploitable.
+You are a senior security expert conducting a thorough vulnerability exploitation analysis.
 
 # Task
 
-Based on the complete analysis of a potential vulnerability path, determine whether the vulnerability is actually exploitable.
+Trace the complete data flow from source to sink, function by function, to determine whether this vulnerability is actually exploitable. Do NOT simply accept previous analysis results at face value - verify and think critically.
 
-# Input Format
+# Analysis Approach
 
-You will receive:
-1. The vulnerability type and sink expression
-2. The complete call chain with source code
-3. Dataflow analysis for each node
-4. Filtering logic found during analysis
+You should analyze the call chain from source to sink, one function at a time:
+
+1. **For each function in the chain**:
+   - Start with the provided source code
+   - Read additional files if needed to understand the full context (class members, called methods, etc.)
+   - With the help of the provided analysis, trace how data flows through this function and identify any logic that might prevent exploitation
+   - Form a intermediate conclusion and carry it to the next function
+
+2. **Be critical of provided analysis**:
+   - Previous analysis identified dataflows and potential blocking logic
+   - These may be incomplete or incorrect - verify them yourself
+   - A "blocking logic" identified earlier might be bypassable
+
+3. **Think about exploitability**:
+   - Can user input actually control the sink's key semantic (path/command)?
+   - Are there any conditions, transformations, or logic that prevent exploitation?
+   - Is the blocking logic effective, or can it be bypassed?
 
 # Output Format
 
-Provide your final decision in this format:
+First, provide your complete analysis. Then, at the END of your response, provide a summary in this EXACT format:
 
 ```plaintext
 --- decision start ---
@@ -652,32 +799,26 @@ Provide your final decision in this format:
 --- summary start ---
 <One sentence summary of the finding>
 --- summary end ---
-
---- reasoning start ---
-<Detailed reasoning for the decision, considering:
-1. Whether user input reaches the sink
-2. Whether any filters effectively prevent exploitation
-3. Any other relevant security considerations>
---- reasoning end ---
 ```
 
 # Decision Guidelines
 
-* **VULNERABLE**: User input reaches the sink with NO effective filtering that prevents exploitation.
-* **NOT VULNERABLE**: Either user input does not reach the sink, OR there is effective filtering that prevents exploitation.
+* **VULNERABLE**: User input can reach and control the sink's key semantic with no effective blocking, OR blocking logic can be bypassed.
+* **NOT VULNERABLE**: There is effective logic that prevents exploitation and cannot be bypassed.
 
 # Confidence Levels
 
-* **High**: Clear evidence one way or the other, minimal ambiguity.
-* **Medium**: Some uncertainty exists, but the evidence leans in one direction.
+* **High**: Clear evidence, thorough analysis, minimal ambiguity.
+* **Medium**: Some uncertainty exists, but evidence leans in one direction.
 * **Low**: Significant uncertainty, manual review strongly recommended.
 
 # Important Rules
 
-* **Focus on This Path**: Only analyze THIS specific call chain and THIS vulnerability type.
-* **Consider All Filters**: Evaluate whether the identified filters are effective.
-* **Be Decisive**: Make a clear decision; do not hedge.
-* **Document Reasoning**: Provide clear reasoning that can be followed by a human reviewer.
+* **Do Your Own Analysis**: Do not blindly trust the provided dataflow/blocking logic analysis. Verify and think critically.
+* **Read Files When Needed**: If you need more context, read the relevant files.
+* **Think Step by Step**: Analyze function by function from source to sink.
+* **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
+* **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
 
 # Restrictions
 
@@ -704,62 +845,112 @@ def final_decision_agent(
         filter_logics: List of filtering logics found during analysis.
 
     Returns:
-        Tuple of (is_vulnerable: bool, confidence: str, summary: str, reasoning: str)
+        Tuple of (is_vulnerable: bool, confidence: str, summary: str)
     """
     update_agent("final_decision_agent", "running", "Making final determination")
     log_info("final_decision_agent", "Making final vulnerability determination")
 
-    # Build call chain display
+    # Build call chain display with function names
     call_chain_display = _build_call_chain_display(path.path)
 
-    # Build user prompt
+    # Build user prompt - organize by node, each with its own info
     user_prompt = f"""# Vulnerability Path Analysis
 
 **Vulnerability Type**: {path.vulnerability_type}
 **Sink Expression**: {path.sink_expression}
-**Call Chain**: {call_chain_display}
 
-## Complete Call Chain with Source Code
+## Call Chain
 
-{_build_path_info_section(path.path)}
+{call_chain_display}
 
-## Dataflow Analysis Results
-
-"""
-
-    for record in dataflow_records:
-        user_prompt += f"""### Node [{record.node_index}]: {record.node_name}
-- Parameters flowing to sink: {', '.join(record.dataflow_info.parameters) if record.dataflow_info.parameters else 'None'}
-- Member variables flowing to sink: {', '.join(record.dataflow_info.member_variables) if record.dataflow_info.member_variables else 'None'}
+---
 
 """
 
-    user_prompt += """## Filtering Logic Found
+    # Build per-node information
+    for i, node in enumerate(path.path):
+        # Find corresponding dataflow record
+        record = None
+        for r in dataflow_records:
+            if r.node_index == i:
+                record = r
+                break
+
+        # Find filter logics for this node
+        node_filters = [f for f in filter_logics if any(
+            node.name in f.dataflow or f.dataflow.startswith(f"<{node.name}") or f"->{node.name}" in f.dataflow.replace(" ", "")
+            for _ in [1]
+        )]
+        # Actually find filters where the source is from this node
+        node_filters = []
+        if record:
+            for f in filter_logics:
+                # Check if any of this node's fields are in the dataflow
+                for field in record.dataflow_info.parameters + record.dataflow_info.member_variables:
+                    if field in f.dataflow:
+                        node_filters.append(f)
+                        break
+
+        user_prompt += f"""## Node {i}: `{node.name}`
+
+**File:** {node.file}
+
+**Source Code:**
+```
+{node.source_code}
+```
 
 """
-    if filter_logics:
-        for i, logic in enumerate(filter_logics, 1):
-            location = logic.file_path
-            if logic.line_range:
-                location += f" (lines {logic.line_range[0]}-{logic.line_range[1]})"
-            user_prompt += f"""### Filter #{i}
-- Dataflow affected: {logic.dataflow}
-- Description: {logic.description}
-- Location: {location}
+
+        if record:
+            # Build member variable hint if there are member variables with `this.`
+            member_hint = ""
+            if record.dataflow_info.member_variables:
+                member_hint = f"""
+**Note on `this`:** In the Dataflow below, `this` after `->` refers to the instance of the called function. E.g., `xxx.func()` means `this` = `xxx`; `this.func()` or direct `func()` means `this` = current function's instance. You need to determine what `this` actually refers to in this context."""
+
+            user_prompt += f"""**Fields that flow to sink:**
+- Parameters: {', '.join(record.dataflow_info.parameters) if record.dataflow_info.parameters else 'None'}
+- Member Variables: {', '.join(record.dataflow_info.member_variables) if record.dataflow_info.member_variables else 'None'}
+{member_hint}
+"""
+
+            if node_filters:
+                user_prompt += f"""**Potential blocking logic in this function:**
+(Dataflow format: `currentField -> nextField`, where nextField is from the NEXT node's fields that flow to sink)
+"""
+                for f in node_filters:
+                    location = f.file_path
+                    if f.line_range:
+                        location += f" (lines {f.line_range[0]}-{f.line_range[1]})"
+                    user_prompt += f"""- Dataflow: {f.dataflow}
+  Description: {f.description}
+  Location: {location}
 
 """
-    else:
-        user_prompt += "No filtering logic was identified.\n\n"
+            else:
+                user_prompt += """**Potential blocking logic in this function:** None identified
 
-    user_prompt += """# Your Task
+"""
 
-Based on all the information above, make a final determination on whether this vulnerability path is exploitable.
-Consider:
-1. Does user input actually reach the sink?
-2. Are there any effective filters that prevent exploitation?
-3. What is your confidence level in this determination?
+        user_prompt += "---\n\n"
 
-Output your decision in the specified format.
+    user_prompt += f"""# Your Task
+
+Starting from `{path.path[0].name}` (the source), trace the data flow function by function to the sink.
+
+For each function:
+1. Read the provided source code
+2. Read additional files if you need more context
+3. With the help of the provided analysis, verify how data flows through this function and Check if any identified blocking logic is actually effective (or bypassable)
+4. Form a conclusion for this hop and proceed to the next
+
+At the end, provide your final decision in the specified format.
+
+**Remember:**
+- Do not blindly trust the provided analysis - verify it yourself
+- Blocking logic might be bypassable - think critically
+- If you need more context, read the relevant files
 """
 
     # Clear stream buffer and execute agent with streaming
@@ -775,13 +966,12 @@ Output your decision in the specified format.
     if result is None:
         update_agent("final_decision_agent", "error", "Agent returned no result")
         log_error("final_decision_agent", "Agent returned no result")
-        return (False, "Low", "Agent failed to produce result", "")
+        return (False, "Low", "Agent failed to produce result")
 
     # Parse response
     decision_str = _parse_marked_section(result, MARKER_DECISION_START, MARKER_DECISION_END)
     confidence = _parse_marked_section(result, MARKER_CONFIDENCE_START, MARKER_CONFIDENCE_END)
     summary = _parse_marked_section(result, MARKER_SUMMARY_START, MARKER_SUMMARY_END)
-    reasoning = _parse_marked_section(result, MARKER_REASONING_START, MARKER_REASONING_END)
 
     # Parse decision
     is_vulnerable = False
@@ -798,10 +988,9 @@ Output your decision in the specified format.
 
     # Handle None values
     summary = summary or "No summary provided"
-    reasoning = reasoning or "No reasoning provided"
 
     decision_text = "VULNERABLE" if is_vulnerable else "NOT VULNERABLE"
     update_agent("final_decision_agent", "completed", f"Decision: {decision_text} ({confidence})")
     log_success("final_decision_agent", f"Decision: {decision_text} (confidence: {confidence})")
 
-    return (is_vulnerable, confidence, summary, reasoning)
+    return (is_vulnerable, confidence, summary)

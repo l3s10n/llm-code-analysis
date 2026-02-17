@@ -117,11 +117,11 @@ class PathVerifier:
         """
         call_chain_display = path.get_call_chain_display()
 
-        # Initialize result
+        # Initialize result with path info from explore module output
         result = VerificationResult(
             vulnerability_type=path.vulnerability_type,
             sink_expression=path.sink_expression,
-            call_chain_display=call_chain_display
+            path=path.path
         )
 
         # Update TUI with current path info
@@ -205,8 +205,8 @@ class PathVerifier:
                 target_path=self.target_path,
                 path=path,
                 node_index=i,
-                x_dataflow=x_dataflow,
-                y_dataflow=y_dataflow
+                current_dataflow=x_dataflow,
+                next_dataflow=y_dataflow
             )
 
             all_filter_logics.extend(filter_logics)
@@ -222,7 +222,7 @@ class PathVerifier:
         set_verify_stage("decision")
         log_info("Verifier", "Phase 3: Final Decision")
 
-        is_vulnerable, confidence, summary, reasoning = final_decision_agent(
+        is_vulnerable, confidence, summary = final_decision_agent(
             target_path=self.target_path,
             path=path,
             dataflow_records=dataflow_records,
@@ -232,7 +232,6 @@ class PathVerifier:
         result.is_vulnerable = is_vulnerable
         result.confidence = confidence
         result.summary = summary
-        result.reasoning = reasoning
 
         # Update statistics
         if is_vulnerable:
