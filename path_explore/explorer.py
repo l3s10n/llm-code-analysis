@@ -25,6 +25,7 @@ from common.tui import (
     clear_current_node,
     print_summary
 )
+from common.agent_logger import init_logger, close_logger
 from .models import (
     FunctionNode,
     NodeTag,
@@ -53,13 +54,14 @@ class FunctionExplorer:
     exploration to find all paths from source to potential vulnerability sinks.
     """
 
-    def __init__(self, target_path: str, target_endpoint: str):
+    def __init__(self, target_path: str, target_endpoint: str, project_name: Optional[str] = None):
         """
         Initialize the FunctionExplorer.
 
         Args:
             target_path: Path to the target project's source code
             target_endpoint: The API endpoint to analyze
+            project_name: Optional project name (derived from target_path if not provided)
         """
         self.target_path = target_path
         self.target_endpoint = target_endpoint
@@ -71,6 +73,19 @@ class FunctionExplorer:
         self.max_nodes = load_config("exploration.max_nodes")
         self.verbose = load_config("exploration.verbose")
         self.node_count = 0  # Track total nodes explored
+
+        # Derive project name from target path if not provided
+        from pathlib import Path
+        if project_name:
+            self.project_name = project_name
+        else:
+            target_path_obj = Path(target_path)
+            self.project_name = target_path_obj.name if target_path_obj.name else target_path_obj.parent.name
+
+        # Sanitize interface name for logging
+        self.interface_name = target_endpoint.strip('/').replace('/', '_')
+        if not self.interface_name:
+            self.interface_name = "root"
 
     def initialize(self) -> bool:
         """
@@ -225,6 +240,13 @@ class FunctionExplorer:
         Returns:
             List of VulnerabilityPath objects representing discovered vulnerability paths
         """
+        # Initialize logger for this session
+        init_logger(
+            project_name=self.project_name,
+            interface_name=self.interface_name,
+            log_type="path_explore"
+        )
+
         # Start TUI directly (no banner before TUI to avoid showing after exit)
         start_tui(
             target_path=self.target_path,
@@ -280,11 +302,13 @@ class FunctionExplorer:
             log_error("Explorer", f"Error: {type(e).__name__}: {str(e)}")
             # Stop TUI and print full traceback
             stop_tui()
+            close_logger()
             self._print_error_detail(e, traceback.format_exc())
             return []
 
         # Stop TUI and print summary
         stop_tui()
+        close_logger()
         self._print_summary()
         return self.vulnerability_paths
 
@@ -433,10 +457,11 @@ Examples:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"{endpoint_name}.json"
 
-    # Create and run explorer
+    # Create and run explorer with project name for logging
     explorer = FunctionExplorer(
         target_path=args.target_path,
-        target_endpoint=args.target_endpoint
+        target_endpoint=args.target_endpoint,
+        project_name=project_name
     )
 
     # Run exploration

@@ -26,6 +26,7 @@ from common.tui import (
     update_verify_stats,
     print_verify_summary
 )
+from common.agent_logger import init_logger, close_logger
 
 from .models import (
     PotentialPath,
@@ -58,13 +59,19 @@ class PathVerifier:
     to determine if they contain exploitable vulnerabilities.
     """
 
-    def __init__(self, target_path: str, potential_paths_file: str):
+    def __init__(
+        self,
+        target_path: str,
+        potential_paths_file: str,
+        project_name: Optional[str] = None
+    ):
         """
         Initialize the PathVerifier.
 
         Args:
             target_path: Path to the target project's source code
             potential_paths_file: Path to the JSON file containing potential paths
+            project_name: Optional project name (derived from target_path if not provided)
         """
         self.target_path = target_path
         self.potential_paths_file = potential_paths_file
@@ -77,6 +84,18 @@ class PathVerifier:
 
         # Load configuration values
         self.verbose = load_config("exploration.verbose")
+
+        # Derive project name from target path if not provided
+        from pathlib import Path
+        if project_name:
+            self.project_name = project_name
+        else:
+            target_path_obj = Path(target_path)
+            self.project_name = target_path_obj.name if target_path_obj.name else target_path_obj.parent.name
+
+        # Extract interface name from the potential paths file
+        paths_file = Path(potential_paths_file)
+        self.interface_name = paths_file.stem  # filename without extension
 
     def load_paths(self) -> bool:
         """
@@ -251,6 +270,13 @@ class PathVerifier:
         Returns:
             List of VerificationResult objects
         """
+        # Initialize logger for this session
+        init_logger(
+            project_name=self.project_name,
+            interface_name=self.interface_name,
+            log_type="path_verify"
+        )
+
         # Start TUI in verify mode
         start_tui(
             target_path=self.target_path,
@@ -284,12 +310,14 @@ class PathVerifier:
             import traceback
             log_error("Verifier", f"Error: {type(e).__name__}: {str(e)}")
             stop_tui()
+            close_logger()
             print("\n[Error Details]")
             print(traceback.format_exc())
             return []
 
         # Stop TUI and print summary
         stop_tui()
+        close_logger()
         print_verify_summary(self.vulnerable_count, self.not_vulnerable_count, len(self.verification_results))
         return self.verification_results
 
@@ -380,10 +408,11 @@ Examples:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = str(output_dir / f"{endpoint_name}.json")
 
-    # Create and run verifier
+    # Create and run verifier with project name for logging
     verifier = PathVerifier(
         target_path=args.target_path,
-        potential_paths_file=args.potential_paths_file
+        potential_paths_file=args.potential_paths_file,
+        project_name=project_name
     )
 
     # Run verification

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from common.base_claude_agent import base_claude_agent
 from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
+from common.agent_logger import log_agent_call
 
 from .models import (
     FunctionNode,
@@ -339,6 +340,13 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
     if result is None:
         update_agent("source_info_find_agent", "error", "Agent returned no result")
         log_error("source_info_find_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="source_info_find_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="None (agent returned no result)"
+        )
         return None
 
     # Parse response
@@ -350,6 +358,13 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
     if not _is_valid_result([None, NOT_FOUND], file_path, function_name, function_code):
         update_agent("source_info_find_agent", "error", f"Failed to locate: {target_endpoint}")
         log_error("source_info_find_agent", f"Failed to locate endpoint: {target_endpoint}")
+        # Log the failed call
+        log_agent_call(
+            agent_name="source_info_find_agent",
+            user_prompt=user_prompt,
+            model_output=result,
+            parsed_result=f"None (validation failed - could not parse: file_path={file_path}, function_name={function_name})"
+        )
         return None
 
     # Type assertions - we validated these are not None
@@ -360,11 +375,20 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
     update_agent("source_info_find_agent", "completed", f"Found: {function_name}\nin {file_path}")
     log_success("source_info_find_agent", f"Found function: {function_name} in {file_path}")
 
-    return SourceInfo(
+    # Log the successful call
+    source_info = SourceInfo(
         function_name=function_name,
         file_path=file_path,
         source_code=function_code
     )
+    log_agent_call(
+        agent_name="source_info_find_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=f"SourceInfo(function_name={function_name}, file_path={file_path}, source_code=<{len(function_code)} chars>)"
+    )
+
+    return source_info
 
 
 # =============================================================================
@@ -483,6 +507,13 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
     if result is None:
         update_agent("sink_next_hop_agent", "error", "Agent returned no result")
         log_error("sink_next_hop_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="sink_next_hop_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="[] (agent returned no result)"
+        )
         return []
 
     # Parse response
@@ -500,6 +531,15 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
 
     update_agent("sink_next_hop_agent", "completed", f"Found {len(sink_results)} sink(s)")
     log_success("sink_next_hop_agent", f"Found {len(sink_results)} sink(s)")
+
+    # Log the call
+    parsed_result_str = str([f"NextHopResult(expression={r.expression}, tag={r.tag.value})" for r in sink_results])
+    log_agent_call(
+        agent_name="sink_next_hop_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=parsed_result_str
+    )
 
     return sink_results
 
@@ -632,6 +672,13 @@ def interest_next_hop_agent(
     if result is None:
         update_agent("interest_next_hop_agent", "error", "Agent returned no result")
         log_error("interest_next_hop_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="interest_next_hop_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="[] (agent returned no result)"
+        )
         return []
 
     # Parse response
@@ -657,6 +704,15 @@ def interest_next_hop_agent(
 
     update_agent("interest_next_hop_agent", "completed", f"Found {len(interest_results)} interest(s)")
     log_success("interest_next_hop_agent", f"Found {len(interest_results)} interest function(s)")
+
+    # Log the call
+    parsed_result_str = str([f"NextHopResult(expression={r.expression}, tag={r.tag.value})" for r in interest_results])
+    log_agent_call(
+        agent_name="interest_next_hop_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=parsed_result_str
+    )
 
     return interest_results
 
@@ -841,6 +897,13 @@ def interest_info_find_agent(
     if result is None:
         update_agent("interest_info_find_agent", "error", "Agent returned no result")
         log_error("interest_info_find_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="interest_info_find_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="[] (agent returned no result)"
+        )
         return []
 
     # Parse response
@@ -857,5 +920,14 @@ def interest_info_find_agent(
 
     update_agent("interest_info_find_agent", "completed", f"Found {len(next_hop_infos)} impl(s)")
     log_success("interest_info_find_agent", f"Found {len(next_hop_infos)} implementation(s)")
+
+    # Log the call
+    parsed_result_str = str([f"NextHopInfo(function_name={i.function_name}, file_path={i.file_path}, source_code=<{len(i.source_code)} chars>)" for i in next_hop_infos])
+    log_agent_call(
+        agent_name="interest_info_find_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=parsed_result_str
+    )
 
     return next_hop_infos

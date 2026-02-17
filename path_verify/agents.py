@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from common.base_claude_agent import base_claude_agent
 from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
+from common.agent_logger import log_agent_call
 
 from .models import (
     PathNode,
@@ -397,6 +398,13 @@ Output the specific fields (param.field.subfield or this.member.field.subfield) 
     if result is None:
         update_agent("one_hop_dataflow_agent", "error", "Agent returned no result")
         log_error("one_hop_dataflow_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="one_hop_dataflow_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="DataflowInfo() (agent returned no result)"
+        )
         return DataflowInfo()
 
     # Parse response
@@ -412,6 +420,14 @@ Output the specific fields (param.field.subfield or this.member.field.subfield) 
                  f"Found: {len(parameters)} params, {len(member_variables)} members")
     log_success("one_hop_dataflow_agent",
                 f"Dataflow: {len(parameters)} params, {len(member_variables)} members")
+
+    # Log the call
+    log_agent_call(
+        agent_name="one_hop_dataflow_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=f"DataflowInfo(parameters={parameters}, member_variables={member_variables})"
+    )
 
     return dataflow_info
 
@@ -702,6 +718,13 @@ where sourceField is from the source fields list and targetField is from the tar
     if result is None:
         update_agent("one_hop_filter_agent", "error", "Agent returned no result")
         log_error("one_hop_filter_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="one_hop_filter_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="[] (agent returned no result)"
+        )
         return []
 
     # Parse filter logic blocks
@@ -709,6 +732,15 @@ where sourceField is from the source fields list and targetField is from the tar
 
     update_agent("one_hop_filter_agent", "completed", f"Found {len(filter_logics)} blocking logic")
     log_success("one_hop_filter_agent", f"Found {len(filter_logics)} blocking logic")
+
+    # Log the call
+    parsed_result_str = str([f"FilterLogic(dataflow={f.dataflow}, description={f.description[:50]}..., file_path={f.file_path}, line_range={f.line_range})" for f in filter_logics])
+    log_agent_call(
+        agent_name="one_hop_filter_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=parsed_result_str
+    )
 
     return filter_logics
 
@@ -966,6 +998,13 @@ At the end, provide your final decision in the specified format.
     if result is None:
         update_agent("final_decision_agent", "error", "Agent returned no result")
         log_error("final_decision_agent", "Agent returned no result")
+        # Log the failed call
+        log_agent_call(
+            agent_name="final_decision_agent",
+            user_prompt=user_prompt,
+            model_output=None,
+            parsed_result="(False, 'Low', 'Agent failed to produce result')"
+        )
         return (False, "Low", "Agent failed to produce result")
 
     # Parse response
@@ -992,5 +1031,13 @@ At the end, provide your final decision in the specified format.
     decision_text = "VULNERABLE" if is_vulnerable else "NOT VULNERABLE"
     update_agent("final_decision_agent", "completed", f"Decision: {decision_text} ({confidence})")
     log_success("final_decision_agent", f"Decision: {decision_text} (confidence: {confidence})")
+
+    # Log the call
+    log_agent_call(
+        agent_name="final_decision_agent",
+        user_prompt=user_prompt,
+        model_output=result,
+        parsed_result=f"(is_vulnerable={is_vulnerable}, confidence='{confidence}', summary='{summary}')"
+    )
 
     return (is_vulnerable, confidence, summary)
