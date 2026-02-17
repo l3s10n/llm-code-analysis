@@ -123,16 +123,16 @@ class VulnerabilityPath:
     Attributes:
         vulnerability_type: Type of vulnerability (PathTraversal or CommandInjection)
         sink_expression: The expression where the sink is called
-        path: List of (file_path, source_code) tuples from source to sink
+        path: List of (file_path, function_name, source_code) tuples from source to sink
     """
     vulnerability_type: str
     sink_expression: str
-    path: List[tuple]  # List of (file_path, source_code)
+    path: List[tuple]  # List of (file_path, function_name, source_code)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
             "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
-            "Path": [{"file": p[0], "source_code": p[1]} for p in self.path]
+            "Path": [{"file": p[0], "name": p[1], "source_code": p[2]} for p in self.path]
         }

@@ -323,11 +323,11 @@ class FunctionExplorer:
             else:
                 continue  # Not a sink, skip
 
-            # Build path data (file_path, source_code tuples)
+            # Build path data (file_path, function_name, source_code tuples)
             path_data = []
             for node in path:
                 if not node.is_sink():  # Only include function nodes, not sink markers
-                    path_data.append((node.file_path, node.source_code))
+                    path_data.append((node.file_path, node.function_name, node.source_code))
 
             # Create vulnerability path object
             vuln_path = VulnerabilityPath(
@@ -428,8 +428,8 @@ Examples:
     if not endpoint_name:
         endpoint_name = "root"
 
-    # Build output path: results/potential_paths/<project_name>/<endpoint>.json
-    output_dir = Path("results") / "potential_paths" / project_name
+    # Build output path: results/<project_name>/potential_paths/<endpoint>.json
+    output_dir = Path("results") / project_name / "potential_paths"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"{endpoint_name}.json"
 
