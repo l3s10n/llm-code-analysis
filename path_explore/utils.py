@@ -1,6 +1,6 @@
 """
 Utility functions for the path exploration module.
-Provides helper functions for tree visualization and logging.
+Provides helper functions for tree traversal and path finding.
 """
 
 import os
@@ -28,73 +28,6 @@ def get_display_name(node: FunctionNode) -> str:
     function_name = node.function_name if node.function_name else "unknown"
 
     return f"<{filename}#{function_name}>"
-
-
-def print_tree_recursive(
-    node: FunctionNode,
-    prefix: str = "",
-    is_last: bool = True,
-    is_root: bool = True
-) -> None:
-    """
-    Recursively print the exploration tree with visual formatting.
-
-    Args:
-        node: Current node to print
-        prefix: Prefix string for indentation
-        is_last: Whether this node is the last child of its parent
-        is_root: Whether this node is the root of the tree
-    """
-    # Determine the connector and new prefix
-    if is_root:
-        connector = ""
-        new_prefix = prefix
-    else:
-        connector = "└── " if is_last else "├── "
-        new_prefix = prefix + ("    " if is_last else "│   ")
-
-    # Print current node
-    display_name = get_display_name(node)
-    tag_display = f" [{node.tag.value}]"
-
-    print(f"{prefix}{connector}{display_name}{tag_display}")
-
-    # Print children
-    children_count = len(node.children)
-    for i, child in enumerate(node.children):
-        is_last_child = (i == children_count - 1)
-        print_tree_recursive(child, new_prefix, is_last_child, is_root=False)
-
-
-def print_exploration_tree(root: FunctionNode, modification_log: str = "") -> None:
-    """
-    Print the exploration tree with a modification log header.
-
-    Args:
-        root: Root node of the exploration tree
-        modification_log: Description of recent modifications
-    """
-    print("\n" + "=" * 60)
-    print("Function Exploration Tree")
-    print("=" * 60)
-
-    if modification_log:
-        print(f"[Modification] {modification_log}")
-
-    print("-" * 60)
-    print_tree_recursive(root)
-    print("=" * 60 + "\n")
-
-
-def log_modification(action: str, details: str) -> None:
-    """
-    Print a modification log message.
-
-    Args:
-        action: Type of action (e.g., "Added", "Removed", "Updated")
-        details: Details about the modification
-    """
-    print(f"[Tree Update] {action}: {details}")
 
 
 def count_nodes_by_tag(root: FunctionNode) -> dict:

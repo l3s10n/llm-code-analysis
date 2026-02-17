@@ -2,12 +2,13 @@
 Base Claude Agent module for GOLD MINER.
 
 Provides a wrapper around Claude Agent SDK for executing AI-powered analysis tasks.
+Supports streaming output via callback function.
 """
 
 import asyncio
 import os
 import warnings
-from typing import Optional
+from typing import Optional, Callable
 
 from claude_agent_sdk import query, ClaudeAgentOptions
 from claude_agent_sdk.types import StreamEvent
@@ -23,6 +24,8 @@ os.environ["ANTHROPIC_AUTH_TOKEN"] = load_config("llm.api_key")
 os.environ["ANTHROPIC_BASE_URL"] = load_config("llm.base_url")
 os.environ["API_TIMEOUT_MS"] = "3000000"
 os.environ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+os.environ["CLAUDE_CODE_DISABLE_BANNER"] = "1"
+os.environ["NO_BANNER"] = "1"  # Generic banner disable
 os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = load_config("llm.model")
 os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"] = load_config("llm.model")
 os.environ["ANTHROPIC_DEFAULT_OPUS_MODEL"] = load_config("llm.model")
@@ -45,7 +48,8 @@ def base_claude_agent(
     system_prompt: str,
     user_prompt: str,
     allowed_tools: Optional[list] = None,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
+    stream_callback: Optional[Callable[[str], None]] = None
 ) -> Optional[str]:
     """
     Execute a Claude agent with the given prompts and configuration.
@@ -57,6 +61,8 @@ def base_claude_agent(
         allowed_tools: List of tools that the agent is allowed to use.
                       Defaults to ['Bash', 'Read', 'Glob', 'Grep'].
         model: Model to use for the agent. Defaults to 'Opus'.
+        stream_callback: Optional callback function for streaming output.
+                        Called with each text chunk as it arrives.
 
     Returns:
         Optional[str]: The result from the agent execution, or None if no result.
@@ -66,13 +72,18 @@ def base_claude_agent(
 
     async def _invoke_claude_agent() -> Optional[str]:
         """Async inner function to execute the agent."""
+        # Suppress banner by providing empty stderr handler
+        def _suppress_stderr(text: str) -> None:
+            pass  # Do nothing - suppress all stderr output including banners
+
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
             allowed_tools=allowed_tools,
             permission_mode="bypassPermissions",
             cwd=cwd,
             model=model,
-            include_partial_messages=True
+            include_partial_messages=True,
+            stderr=_suppress_stderr  # Suppress stderr output (including banner)
         )
 
         result = None
@@ -88,13 +99,18 @@ def base_claude_agent(
                     if event_type == "content_block_delta":
                         delta = event.get("delta", {})
                         if delta.get("type") == "text_delta":
-                            print(delta.get("text", ""), end="", flush=True)
+                            text_chunk = delta.get("text", "")
+                            # Call stream callback if provided
+                            if stream_callback and text_chunk:
+                                stream_callback(text_chunk)
 
                     if event_type == "content_block_start":
                         content_block = event.get("content_block", {})
                         if content_block.get("type") == "tool_use":
                             current_tool = content_block.get("name")
-                            print(f"[Tool: {current_tool}]", flush=True)
+                            # Notify about tool usage
+                            if stream_callback:
+                                stream_callback(f"\n[Using tool: {current_tool}]\n")
 
                 if hasattr(message, "result"):
                     result = message.result

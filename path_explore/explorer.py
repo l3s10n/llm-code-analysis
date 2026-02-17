@@ -12,6 +12,19 @@ from typing import List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.config import load_config
+from common.tui import (
+    start_tui,
+    stop_tui,
+    log_info,
+    log_success,
+    log_error,
+    log_warning,
+    update_tree,
+    update_stats,
+    set_current_node,
+    clear_current_node,
+    print_summary
+)
 from .models import (
     FunctionNode,
     NodeTag,
@@ -26,8 +39,6 @@ from .agents import (
     interest_info_find_agent
 )
 from .utils import (
-    print_exploration_tree,
-    log_modification,
     find_first_interest_leaf,
     has_unexplored_interest_nodes,
     find_sink_paths
@@ -71,8 +82,8 @@ class FunctionExplorer:
         Returns:
             True if initialization successful, False otherwise
         """
-        print(f"\n[Explorer] Initializing exploration for endpoint: {self.target_endpoint}")
-        print(f"[Explorer] Target path: {self.target_path}")
+        log_info("Explorer", f"Initializing exploration for endpoint: {self.target_endpoint}")
+        log_info("Explorer", f"Target path: {self.target_path}")
 
         # Find source function information
         source_info: Optional[SourceInfo] = source_info_find_agent(
@@ -81,7 +92,7 @@ class FunctionExplorer:
         )
 
         if source_info is None:
-            print(f"[Explorer] ERROR: Could not find source function for endpoint: {self.target_endpoint}")
+            log_error("Explorer", f"Could not find source function for endpoint: {self.target_endpoint}")
             return False
 
         # Create root node with Interest tag
@@ -93,8 +104,8 @@ class FunctionExplorer:
             extra_info=""
         )
 
-        log_modification("Created root node", f"{source_info.function_name} in {source_info.file_path}")
-        print_exploration_tree(self.root, "Initialized exploration tree with source function")
+        log_success("Explorer", f"Created root node: {source_info.function_name} in {source_info.file_path}")
+        update_tree(self.root)
 
         return True
 
@@ -111,14 +122,17 @@ class FunctionExplorer:
         # Get the call chain from root to current node
         call_chain = node.get_path_to_root()
 
-        print(f"\n[Explorer] Exploring node: {node.function_name}")
-        print(f"[Explorer] Call chain length: {len(call_chain)}")
+        # Set current node for highlighting and update tree
+        set_current_node(node.file_path, node.function_name)
+        update_tree(self.root)
+
+        log_info("Explorer", f"Exploring: {node.function_name}")
 
         # Find next hops using the agent
         next_hops: List[NextHopResult] = next_hop_agent(self.target_path, call_chain)
 
         if not next_hops:
-            print(f"[Explorer] No next hops found for node: {node.function_name}")
+            log_warning("Explorer", f"No next hops found for node: {node.function_name}")
             # No next hops - need to prune this branch
             self._prune_branch(node)
             return
@@ -130,7 +144,7 @@ class FunctionExplorer:
         )]
         interest_hops = [nh for nh in next_hops if nh.tag == NodeTag.INTEREST]
 
-        print(f"[Explorer] Found {len(sink_hops)} sink(s) and {len(interest_hops)} interest node(s)")
+        log_success("Explorer", f"Found {len(sink_hops)} sink(s) and {len(interest_hops)} interest node(s)")
 
         # Process sink nodes
         for sink in sink_hops:
@@ -143,7 +157,7 @@ class FunctionExplorer:
             )
             node.add_child(sink_node)
             self.node_count += 1
-            log_modification("Added sink node", f"{sink.tag.value}: {sink.expression}")
+            log_success("Explorer", f"Added sink node: {sink.tag.value}: {sink.expression}")
 
         # Process interest nodes - need to find their implementations
         if interest_hops:
@@ -164,10 +178,11 @@ class FunctionExplorer:
                 )
                 node.add_child(interest_node)
                 self.node_count += 1
-                log_modification("Added interest node", f"{info.function_name} in {info.file_path}")
+                log_success("Explorer", f"Added interest node: {info.function_name} in {info.file_path}")
 
-        # Print updated tree
-        print_exploration_tree(self.root, f"Explored {node.function_name}")
+        # Update tree display and clear current node highlighting
+        clear_current_node()
+        update_tree(self.root)
 
     def _prune_branch(self, node: FunctionNode) -> None:
         """
@@ -197,8 +212,8 @@ class FunctionExplorer:
         # Remove the identified branch
         if prune_from.parent is not None:
             prune_from.parent.remove_child(prune_from)
-            log_modification("Pruned branch", f"No viable paths found from {prune_from.function_name}")
-            print_exploration_tree(self.root, f"Pruned dead-end branch at {prune_from.function_name}")
+            log_warning("Explorer", f"Pruned branch: No viable paths found from {prune_from.function_name}")
+            update_tree(self.root)
 
     def run_exploration(self) -> List[VulnerabilityPath]:
         """
@@ -210,59 +225,80 @@ class FunctionExplorer:
         Returns:
             List of VulnerabilityPath objects representing discovered vulnerability paths
         """
-        print("\n" + "=" * 60)
-        print("GOLD MINER - Vulnerability Path Discovery")
-        print("=" * 60)
+        # Start TUI directly (no banner before TUI to avoid showing after exit)
+        start_tui(
+            target_path=self.target_path,
+            target_endpoint=self.target_endpoint
+        )
 
-        # Print configuration info if verbose
-        if self.verbose:
-            print(f"[Config] Max depth: {self.max_depth}")
-            print(f"[Config] Max nodes: {self.max_nodes}")
-            print(f"[Config] Verbose: {self.verbose}")
+        try:
+            # Log configuration info
+            if self.verbose:
+                log_info("Config", f"Max depth: {self.max_depth}")
+                log_info("Config", f"Max nodes: {self.max_nodes}")
 
-        # Step 1: Initialize with source function
-        if not self.initialize():
-            print("[Explorer] Exploration failed: Could not initialize")
+            # Step 1: Initialize with source function
+            if not self.initialize():
+                log_error("Explorer", "Exploration failed: Could not initialize")
+                return []
+
+            self.node_count = 1  # Count root node
+            update_stats(self.node_count)
+
+            # Type guard - root is guaranteed to be set after successful initialization
+            assert self.root is not None
+
+            # Step 2: DFS exploration loop
+            while has_unexplored_interest_nodes(self.root):
+                # Check node count limit
+                if self.node_count >= self.max_nodes:
+                    log_warning("Explorer", f"Reached max node limit ({self.max_nodes}), stopping")
+                    break
+
+                # Find first Interest leaf node
+                current_node = find_first_interest_leaf(self.root)
+
+                if current_node is None:
+                    break
+
+                # Check depth limit
+                current_depth = len(current_node.get_path_to_root()) - 1
+                if current_depth >= self.max_depth:
+                    log_warning("Explorer", f"Max depth reached, pruning: {current_node.function_name}")
+                    self._prune_branch(current_node)
+                    continue
+
+                # Explore this node
+                self.explore_node(current_node)
+                update_stats(self.node_count)
+
+            # Step 3: Extract and store vulnerability paths
+            self._extract_vulnerability_paths()
+
+        except Exception as e:
+            import traceback
+            log_error("Explorer", f"Error: {type(e).__name__}: {str(e)}")
+            # Stop TUI and print full traceback
+            stop_tui()
+            self._print_error_detail(e, traceback.format_exc())
             return []
 
-        self.node_count = 1  # Count root node
-
-        # Step 2: DFS exploration loop
-        iteration = 0
-        while has_unexplored_interest_nodes(self.root):
-            iteration += 1
-
-            # Check node count limit
-            if self.node_count >= self.max_nodes:
-                print(f"[Explorer] Reached max node limit ({self.max_nodes}), stopping exploration")
-                break
-
-            print(f"\n[Explorer] --- Exploration Iteration {iteration} ---")
-
-            # Find first Interest leaf node
-            current_node = find_first_interest_leaf(self.root)
-
-            if current_node is None:
-                print("[Explorer] No more nodes to explore")
-                break
-
-            # Check depth limit
-            current_depth = len(current_node.get_path_to_root()) - 1
-            if current_depth >= self.max_depth:
-                print(f"[Explorer] Node at max depth ({self.max_depth}), pruning: {current_node.function_name}")
-                self._prune_branch(current_node)
-                continue
-
-            # Explore this node
-            self.explore_node(current_node)
-
-        # Step 3: Extract and store vulnerability paths
-        self._extract_vulnerability_paths()
-
-        # Print summary
+        # Stop TUI and print summary
+        stop_tui()
         self._print_summary()
-
         return self.vulnerability_paths
+
+    def _print_error_detail(self, error: Exception, traceback_str: str) -> None:
+        """Print detailed error information after TUI stops."""
+        from rich.console import Console
+        console = Console()
+        console.print()
+        console.rule("[bold red]Error Occurred[/bold red]")
+        console.print(f"[red]{type(error).__name__}[/red]: {error}")
+        console.print()
+        console.print("[dim]Traceback:[/dim]")
+        console.print(traceback_str)
+        console.rule()
 
     def _extract_vulnerability_paths(self) -> None:
         """
@@ -271,6 +307,10 @@ class FunctionExplorer:
         Finds all paths from root to sink nodes and converts them
         to VulnerabilityPath objects for output.
         """
+        # Type guard - root is guaranteed to be set after successful initialization
+        if self.root is None:
+            return
+
         sink_paths = find_sink_paths(self.root)
 
         for path in sink_paths:
@@ -301,11 +341,6 @@ class FunctionExplorer:
         """
         Print a summary of the exploration results.
         """
-        print("\n" + "=" * 60)
-        print("Exploration Summary")
-        print("=" * 60)
-        print(f"Total potential vulnerability paths found: {len(self.vulnerability_paths)}")
-
         # Count by type
         path_traversal_count = sum(
             1 for p in self.vulnerability_paths
@@ -316,9 +351,12 @@ class FunctionExplorer:
             if p.vulnerability_type == "CommandInjection"
         )
 
-        print(f"  - Potential Path Traversal vulnerabilities: {path_traversal_count}")
-        print(f"  - Potential Command Injection vulnerabilities: {command_injection_count}")
-        print("=" * 60 + "\n")
+        # Use TUI to print summary
+        print_summary(
+            path_traversal_count=path_traversal_count,
+            command_injection_count=command_injection_count,
+            total_paths=len(self.vulnerability_paths)
+        )
 
     def export_results(self, output_path: str) -> None:
         """
@@ -332,7 +370,10 @@ class FunctionExplorer:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        print(f"[Explorer] Results exported to: {output_path}")
+        # Use console directly for export message (after TUI is stopped)
+        from rich.console import Console
+        console = Console()
+        console.print(f"[green]Results exported to:[/green] {output_path}")
 
     def get_results_json(self) -> str:
         """
@@ -351,6 +392,8 @@ class FunctionExplorer:
 
 if __name__ == '__main__':
     import argparse
+    from pathlib import Path
+    from rich.console import Console
 
     parser = argparse.ArgumentParser(
         description='GOLD MINER - Vulnerability Path Discovery Tool',
@@ -358,7 +401,7 @@ if __name__ == '__main__':
         epilog="""
 Examples:
   python -m path_explore.explorer ./testProject /api/readFile
-  python -m path_explore.explorer ./my-project /api/upload -o results.json
+  python -m path_explore.explorer ./my-project /api/upload
         """
     )
 
@@ -374,14 +417,21 @@ Examples:
         help='The API endpoint to analyze (e.g., /api/readFile)'
     )
 
-    parser.add_argument(
-        '-o', '--output',
-        type=str,
-        default=None,
-        help='Output file path for JSON results (default: print to console)'
-    )
-
     args = parser.parse_args()
+
+    # Get project name from target path (last component of path)
+    target_path = Path(args.target_path)
+    project_name = target_path.name if target_path.name else target_path.parent.name
+
+    # Sanitize endpoint name for filename (replace / with _)
+    endpoint_name = args.target_endpoint.strip('/').replace('/', '_')
+    if not endpoint_name:
+        endpoint_name = "root"
+
+    # Build output path: results/potential_paths/<project_name>/<endpoint>.json
+    output_dir = Path("results") / "potential_paths" / project_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"{endpoint_name}.json"
 
     # Create and run explorer
     explorer = FunctionExplorer(
@@ -392,9 +442,5 @@ Examples:
     # Run exploration
     vulnerability_paths = explorer.run_exploration()
 
-    # Output results
-    if args.output:
-        explorer.export_results(args.output)
-    else:
-        print("\n[Results]")
-        print(explorer.get_results_json())
+    # Export results to file
+    explorer.export_results(str(output_file))

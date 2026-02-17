@@ -9,6 +9,7 @@ import re
 from typing import List, Optional
 
 from common.base_claude_agent import base_claude_agent
+from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
 
 from .models import (
     FunctionNode,
@@ -319,21 +320,25 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
         >>> print(info.function_name)
         'readFileHandler'
     """
-    print(f"[source_info_find_agent] Analyzing endpoint: {target_endpoint}")
-    print(f"[source_info_find_agent] Target path: {target_path}")
+    update_agent("source_info_find_agent", "running", f"Analyzing: {target_endpoint}")
+    log_info("source_info_find_agent", f"Analyzing endpoint: {target_endpoint}")
 
     # Build prompts
     user_prompt = f"Interface name: {target_endpoint}"
 
-    # Execute agent
+    # Clear stream buffer and execute agent with streaming
+    clear_stream()
+
     result = base_claude_agent(
         cwd=target_path,
         system_prompt=_SOURCE_INFO_SYSTEM_PROMPT,
-        user_prompt=user_prompt
+        user_prompt=user_prompt,
+        stream_callback=stream_agent
     )
 
     if result is None:
-        print("[source_info_find_agent] Agent returned no result")
+        update_agent("source_info_find_agent", "error", "Agent returned no result")
+        log_error("source_info_find_agent", "Agent returned no result")
         return None
 
     # Parse response
@@ -343,10 +348,17 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
 
     # Validate and return
     if not _is_valid_result([None, NOT_FOUND], file_path, function_name, function_code):
-        print(f"[source_info_find_agent] Failed to locate endpoint: {target_endpoint}")
+        update_agent("source_info_find_agent", "error", f"Failed to locate: {target_endpoint}")
+        log_error("source_info_find_agent", f"Failed to locate endpoint: {target_endpoint}")
         return None
 
-    print(f"[source_info_find_agent] Found function: {function_name} in {file_path}")
+    # Type assertions - we validated these are not None
+    assert file_path is not None
+    assert function_name is not None
+    assert function_code is not None
+
+    update_agent("source_info_find_agent", "completed", f"Found: {function_name}\nin {file_path}")
+    log_success("source_info_find_agent", f"Found function: {function_name} in {file_path}")
 
     return SourceInfo(
         function_name=function_name,
@@ -448,24 +460,29 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
         the current function's source code.
     """
     if not call_chain:
-        print("[sink_next_hop_agent] Empty call chain provided")
+        log_error("sink_next_hop_agent", "Empty call chain provided")
         return []
 
     current_function = call_chain[-1]
-    print(f"[sink_next_hop_agent] Analyzing function: {current_function.function_name}")
+    update_agent("sink_next_hop_agent", "running", f"Finding sinks in: {current_function.function_name}")
+    log_info("sink_next_hop_agent", f"Analyzing function: {current_function.function_name}")
 
     # Build user prompt
     user_prompt = _build_user_prompt(call_chain)
 
-    # Execute agent
+    # Clear stream buffer and execute agent with streaming
+    clear_stream()
+
     result = base_claude_agent(
         cwd=target_path,
         system_prompt=_SINK_NEXT_HOP_SYSTEM_PROMPT,
-        user_prompt=user_prompt
+        user_prompt=user_prompt,
+        stream_callback=stream_agent
     )
 
     if result is None:
-        print("[sink_next_hop_agent] Agent returned no result")
+        update_agent("sink_next_hop_agent", "error", "Agent returned no result")
+        log_error("sink_next_hop_agent", "Agent returned no result")
         return []
 
     # Parse response
@@ -480,10 +497,9 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
             function_name = _extract_function_name(expression)
             if function_name and _is_function_in_code(function_name, current_function.source_code):
                 sink_results.append(NextHopResult(expression=expression, tag=tag))
-            else:
-                print(f"[sink_next_hop_agent] Filtered out result: {expression} (not found in code)")
 
-    print(f"[sink_next_hop_agent] Found {len(sink_results)} sink(s)")
+    update_agent("sink_next_hop_agent", "completed", f"Found {len(sink_results)} sink(s)")
+    log_success("sink_next_hop_agent", f"Found {len(sink_results)} sink(s)")
 
     return sink_results
 
@@ -584,12 +600,12 @@ def interest_next_hop_agent(
         - tag: NodeTag.INTEREST
     """
     if not call_chain:
-        print("[interest_next_hop_agent] Empty call chain provided")
+        log_error("interest_next_hop_agent", "Empty call chain provided")
         return []
 
     current_function = call_chain[-1]
-    print(f"[interest_next_hop_agent] Analyzing function: {current_function.function_name}")
-    print(f"[interest_next_hop_agent] Sink functions to exclude: {sink_function_names}")
+    update_agent("interest_next_hop_agent", "running", f"Finding interests in: {current_function.function_name}")
+    log_info("interest_next_hop_agent", f"Analyzing function: {current_function.function_name}")
 
     # Build user prompt with sink exclusion info
     base_prompt = _build_user_prompt(call_chain)
@@ -603,15 +619,19 @@ def interest_next_hop_agent(
     else:
         user_prompt = base_prompt
 
-    # Execute agent
+    # Clear stream buffer and execute agent with streaming
+    clear_stream()
+
     result = base_claude_agent(
         cwd=target_path,
         system_prompt=_INTEREST_NEXT_HOP_SYSTEM_PROMPT,
-        user_prompt=user_prompt
+        user_prompt=user_prompt,
+        stream_callback=stream_agent
     )
 
     if result is None:
-        print("[interest_next_hop_agent] Agent returned no result")
+        update_agent("interest_next_hop_agent", "error", "Agent returned no result")
+        log_error("interest_next_hop_agent", "Agent returned no result")
         return []
 
     # Parse response
@@ -627,17 +647,16 @@ def interest_next_hop_agent(
 
             # Check if function exists in current function's code
             if not function_name or not _is_function_in_code(function_name, current_function.source_code):
-                print(f"[interest_next_hop_agent] Filtered out result: {expression} (not found in code)")
                 continue
 
             # Check if function is already identified as a sink
             if function_name in sink_function_names:
-                print(f"[interest_next_hop_agent] Filtered out result: {expression} (is a sink function)")
                 continue
 
             interest_results.append(NextHopResult(expression=expression, tag=tag))
 
-    print(f"[interest_next_hop_agent] Found {len(interest_results)} interest function(s)")
+    update_agent("interest_next_hop_agent", "completed", f"Found {len(interest_results)} interest(s)")
+    log_success("interest_next_hop_agent", f"Found {len(interest_results)} interest function(s)")
 
     return interest_results
 
@@ -671,12 +690,11 @@ def next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[Nex
         'processFile(content): Interest'
     """
     if not call_chain:
-        print("[next_hop_agent] Empty call chain provided")
+        log_error("next_hop_agent", "Empty call chain provided")
         return []
 
     current_function = call_chain[-1]
-    print(f"[next_hop_agent] Analyzing function: {current_function.function_name}")
-    print(f"[next_hop_agent] Call chain length: {len(call_chain)}")
+    log_info("next_hop_agent", f"Analyzing: {current_function.function_name}")
 
     # Step 1: Find sink functions
     sink_results = sink_next_hop_agent(target_path, call_chain)
@@ -694,7 +712,7 @@ def next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[Nex
     # Combine results
     all_results = sink_results + interest_results
 
-    print(f"[next_hop_agent] Total: {len(all_results)} next hop(s) ({len(sink_results)} sinks, {len(interest_results)} interests)")
+    log_success("next_hop_agent", f"Total: {len(all_results)} ({len(sink_results)} sinks, {len(interest_results)} interests)")
 
     return all_results
 
@@ -793,13 +811,12 @@ def interest_info_find_agent(
         'read in ./services/SafeFileServiceImpl.java'
     """
     if not call_chain or not interest_expressions:
-        print("[interest_info_find_agent] Empty call chain or expressions provided")
+        log_error("interest_info_find_agent", "Empty call chain or expressions provided")
         return []
 
     current_function = call_chain[-1]
-    print(f"[interest_info_find_agent] Finding implementations for {len(interest_expressions)} next hop function(s)")
-    print(f"[interest_info_find_agent] Current function: {current_function.function_name}")
-    print(f"[interest_info_find_agent] Next hop expressions: {interest_expressions}")
+    update_agent("interest_info_find_agent", "running", f"Finding {len(interest_expressions)} impl(s)")
+    log_info("interest_info_find_agent", f"Finding implementations for {len(interest_expressions)} function(s)")
 
     # Build user prompt with call chain and next hop expressions
     base_prompt = _build_user_prompt(call_chain)
@@ -811,15 +828,19 @@ def interest_info_find_agent(
 
     user_prompt = base_prompt + next_hop_section
 
-    # Execute agent
+    # Clear stream buffer and execute agent with streaming
+    clear_stream()
+
     result = base_claude_agent(
         cwd=target_path,
         system_prompt=_INTEREST_INFO_FIND_SYSTEM_PROMPT,
-        user_prompt=user_prompt
+        user_prompt=user_prompt,
+        stream_callback=stream_agent
     )
 
     if result is None:
-        print("[interest_info_find_agent] Agent returned no result")
+        update_agent("interest_info_find_agent", "error", "Agent returned no result")
+        log_error("interest_info_find_agent", "Agent returned no result")
         return []
 
     # Parse response
@@ -834,6 +855,7 @@ def interest_info_find_agent(
             source_code=info['source_code']
         ))
 
-    print(f"[interest_info_find_agent] Found {len(next_hop_infos)} implementation(s)")
+    update_agent("interest_info_find_agent", "completed", f"Found {len(next_hop_infos)} impl(s)")
+    log_success("interest_info_find_agent", f"Found {len(next_hop_infos)} implementation(s)")
 
     return next_hop_infos

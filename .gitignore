@@ -5,3 +5,4 @@ CLAUDE.md
 __pycache__/
 temp/
 test/
+results/
