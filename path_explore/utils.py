@@ -79,18 +79,21 @@ def find_sink_paths(root: FunctionNode) -> list:
     return paths
 
 
-def find_first_interest_leaf(root: FunctionNode) -> Optional[FunctionNode]:
+def find_first_interest_leaf(root: Optional[FunctionNode]) -> Optional[FunctionNode]:
     """
     Find the first Interest-tagged leaf node using DFS.
 
     This is used to determine which node to explore next.
 
     Args:
-        root: Root node of the tree
+        root: Root node of the tree, or None if tree is empty
 
     Returns:
         The first Interest leaf node found, or None if no such node exists
     """
+    if root is None:
+        return None
+
     def dfs(node: FunctionNode) -> Optional[FunctionNode]:
         # Check if this node is an Interest leaf
         if node.tag == NodeTag.INTEREST and node.is_leaf():
@@ -107,12 +110,12 @@ def find_first_interest_leaf(root: FunctionNode) -> Optional[FunctionNode]:
     return dfs(root)
 
 
-def has_unexplored_interest_nodes(root: FunctionNode) -> bool:
+def has_unexplored_interest_nodes(root: Optional[FunctionNode]) -> bool:
     """
     Check if there are any Interest-tagged leaf nodes remaining to explore.
 
     Args:
-        root: Root node of the tree
+        root: Root node of the tree, or None if tree is empty
 
     Returns:
         True if there are unexplored Interest nodes, False otherwise

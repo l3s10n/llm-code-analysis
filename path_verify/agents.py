@@ -143,28 +143,6 @@ def _build_call_chain_display(path: List[PathNode]) -> str:
     return " -> ".join(names)
 
 
-def _build_path_info_section(path: List[PathNode]) -> str:
-    """
-    Build a formatted section with path information.
-
-    Args:
-        path: List of PathNode from source to sink
-
-    Returns:
-        Formatted string with each node's details
-    """
-    sections = []
-    for i, node in enumerate(path):
-        section = f"""## Node {i}: {node.name}
-File: {node.file}
-Source Code:
-```
-{node.source_code}
-```"""
-        sections.append(section)
-    return "\n\n".join(sections)
-
-
 # =============================================================================
 # One Hop Dataflow Agent
 # =============================================================================
@@ -728,7 +706,7 @@ where sourceField is from the source fields list and targetField is from the tar
         return []
 
     # Parse filter logic blocks
-    filter_logics = _parse_filter_logics(result)
+    filter_logics = _parse_filter_logics(result, node_index)
 
     update_agent("one_hop_filter_agent", "completed", f"Found {len(filter_logics)} blocking logic")
     log_success("one_hop_filter_agent", f"Found {len(filter_logics)} blocking logic")
@@ -745,12 +723,13 @@ where sourceField is from the source fields list and targetField is from the tar
     return filter_logics
 
 
-def _parse_filter_logics(text: str) -> List[FilterLogic]:
+def _parse_filter_logics(text: str, node_index: int = -1) -> List[FilterLogic]:
     """
     Parse filter logic blocks from agent response.
 
     Args:
         text: Agent response text
+        node_index: Index of the node where this filter was found
 
     Returns:
         List of FilterLogic objects
@@ -777,7 +756,8 @@ def _parse_filter_logics(text: str) -> List[FilterLogic]:
                 dataflow=dataflow,
                 description=description,
                 file_path=file_path or "Unknown",
-                line_range=line_range
+                line_range=line_range,
+                node_index=node_index
             ))
 
     return results
@@ -901,27 +881,26 @@ def final_decision_agent(
 
     # Build per-node information
     for i, node in enumerate(path.path):
-        # Find corresponding dataflow record
-        record = None
+        # Find corresponding dataflow record for current node
+        current_record = None
         for r in dataflow_records:
             if r.node_index == i:
-                record = r
+                current_record = r
                 break
 
-        # Find filter logics for this node
-        node_filters = [f for f in filter_logics if any(
-            node.name in f.dataflow or f.dataflow.startswith(f"<{node.name}") or f"->{node.name}" in f.dataflow.replace(" ", "")
-            for _ in [1]
-        )]
-        # Actually find filters where the source is from this node
-        node_filters = []
-        if record:
-            for f in filter_logics:
-                # Check if any of this node's fields are in the dataflow
-                for field in record.dataflow_info.parameters + record.dataflow_info.member_variables:
-                    if field in f.dataflow:
-                        node_filters.append(f)
-                        break
+        # Find corresponding dataflow record for next node
+        next_record = None
+        if i + 1 < len(path.path):
+            for r in dataflow_records:
+                if r.node_index == i + 1:
+                    next_record = r
+                    break
+
+        # Determine if this is the last node (direct caller of sink)
+        is_last_node = (i == len(path.path) - 1)
+
+        # Find filter logics for THIS hop only (by node_index)
+        node_filters = [f for f in filter_logics if f.node_index == i]
 
         user_prompt += f"""## Node {i}: `{node.name}`
 
@@ -934,23 +913,69 @@ def final_decision_agent(
 
 """
 
-        if record:
-            # Build member variable hint if there are member variables with `this.`
-            member_hint = ""
-            if record.dataflow_info.member_variables:
-                member_hint = f"""
-**Note on `this`:** In the Dataflow below, `this` after `->` refers to the instance of the called function. E.g., `xxx.func()` means `this` = `xxx`; `this.func()` or direct `func()` means `this` = current function's instance. You need to determine what `this` actually refers to in this context."""
+        if current_record:
+            if is_last_node:
+                # Last node - flows directly to sink
+                user_prompt += f"""**How `{node.name}` flows to sink:**
 
-            user_prompt += f"""**Fields that flow to sink:**
-- Parameters: {', '.join(record.dataflow_info.parameters) if record.dataflow_info.parameters else 'None'}
-- Member Variables: {', '.join(record.dataflow_info.member_variables) if record.dataflow_info.member_variables else 'None'}
-{member_hint}
+`{node.name}`'s fields:
+- Parameters: {', '.join(current_record.dataflow_info.parameters) if current_record.dataflow_info.parameters else 'None'}
+- Member Variables: {', '.join(current_record.dataflow_info.member_variables) if current_record.dataflow_info.member_variables else 'None'}
+
+flow directly to sink.
+
+"""
+            else:
+                # Not last node - flows to next node
+                next_node = path.path[i + 1]
+
+                # Build current node's fields
+                current_params = ', '.join(current_record.dataflow_info.parameters) if current_record.dataflow_info.parameters else 'None'
+                current_members = ', '.join(current_record.dataflow_info.member_variables) if current_record.dataflow_info.member_variables else 'None'
+
+                # Build next node's fields
+                if next_record:
+                    next_params = ', '.join(next_record.dataflow_info.parameters) if next_record.dataflow_info.parameters else 'None'
+                    next_members = ', '.join(next_record.dataflow_info.member_variables) if next_record.dataflow_info.member_variables else 'None'
+                else:
+                    next_params = 'Unknown'
+                    next_members = 'Unknown'
+
+                user_prompt += f"""**How `{node.name}` flows to `{next_node.name}` and eventually to sink:**
+
+`{node.name}`'s fields:
+- Parameters: {current_params}
+- Member Variables: {current_members}
+
+flow to `{next_node.name}`'s fields:
+
+"""
+
+                # Add `this` note only if there are member variables in next node
+                if next_record and next_record.dataflow_info.member_variables:
+                    user_prompt += f"""> **Note on `this`**: `this` refers to the instance of the called function. `xxx.{next_node.name}()` means `this` of `{next_node.name}` = `xxx`; `this.{next_node.name}()` or direct `{next_node.name}()` means `this` = current function's instance. Determine what `this` refers to based on context.
+
+"""
+
+                user_prompt += f"""- Parameters: {next_params}
+- Member Variables: {next_members}
+
+and eventually to sink.
+
+"""
+
+            # Add potential blocking logic for this hop
+            if is_last_node:
+                user_prompt += f"""**Potential blocking logic in `{node.name}` → sink:**
+
+"""
+            else:
+                next_node = path.path[i + 1]
+                user_prompt += f"""**Potential blocking logic in `{node.name}` → `{next_node.name}`:**
+
 """
 
             if node_filters:
-                user_prompt += f"""**Potential blocking logic in this function:**
-(Dataflow format: `currentField -> nextField`, where nextField is from the NEXT node's fields that flow to sink)
-"""
                 for f in node_filters:
                     location = f.file_path
                     if f.line_range:
@@ -961,7 +986,7 @@ def final_decision_agent(
 
 """
             else:
-                user_prompt += """**Potential blocking logic in this function:** None identified
+                user_prompt += """None identified.
 
 """
 

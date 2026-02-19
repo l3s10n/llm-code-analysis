@@ -210,7 +210,8 @@ class FunctionExplorer:
         Prune a branch from the first ancestor with no other branches.
 
         Removes the path from the given node up to the first ancestor
-        that has other children (branches).
+        that has other children (branches). If the entire chain is single-branch,
+        clears the entire tree to end exploration.
 
         Args:
             node: The leaf node to start pruning from
@@ -232,9 +233,14 @@ class FunctionExplorer:
 
         # Remove the identified branch
         if prune_from.parent is not None:
+            # Found an ancestor with other branches, prune this branch
             prune_from.parent.remove_child(prune_from)
             log_warning("Explorer", f"Pruned branch: No viable paths found from {prune_from.function_name}")
             update_tree(self.root)
+        else:
+            # The entire tree is a single chain with no viable paths, clear it
+            log_warning("Explorer", "Entire exploration tree is a single chain with no viable paths, clearing tree")
+            self.root = None
 
     def run_exploration(self) -> List[VulnerabilityPath]:
         """

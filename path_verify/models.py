@@ -139,11 +139,15 @@ class FilterLogic:
         file_path: File path where the filtering logic is implemented
         line_range: Line number range (start, end) of the filtering logic,
                    or None if not determined
+        node_index: Index of the node where this filter was found (0-based).
+                   Indicates this filter logic applies to the hop from
+                   node[node_index] to node[node_index+1] (or sink if last node).
     """
     dataflow: str
     description: str
     file_path: str
     line_range: Optional[tuple] = None
+    node_index: int = -1  # -1 means not specified
 
     def to_display(self) -> str:
         """
