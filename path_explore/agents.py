@@ -595,9 +595,9 @@ Interest
 1. list all potential interest functions that are called as next hops by the current function.
 2. Check whether these potential interest functions meet all the requirements:
    2.1 Basic requirements: Ensure the function currently being analyzed is the next hop of the current function.
-   2.2 Inspection requirements:
-    a) Exclude any functions that have been explicitly excluded by the user (provided in the exclusion list)
-    b) Exclude any functions that are unlikely to further call sink methods
+   2.2 Inspection requirements: 
+    a) Exclude any functions that have been identified as sink functions (provided by the user) 
+    b) Exclude any functions that are unlikely to further call sink methods 
     c) Keep those that may further call sink methods (including uncertain ones).
    2.3 Origin requirements: Ensure the interest function is implemented in the current project. If the interest function is an interface called by the current function, analyze whether its implementation class is implemented in the current project. (Do not conduct in-depth analysis of the logic inside the interest function!!!—that is not your task.)
 3. Summarize and output the results according to the format above.
@@ -652,7 +652,7 @@ def interest_next_hop_agent(
 
     # Add sink function exclusion information
     if sink_function_names:
-        sink_info = f"\n# Functions to Exclude\nThe following functions must NOT be included in your results:\n"
+        sink_info = f"\n# Sink Functions to Exclude\nThe following functions have already been identified as sinks. Do NOT include them in your results:\n"
         for name in sink_function_names:
             sink_info += f"- {name}\n"
         user_prompt = base_prompt + sink_info

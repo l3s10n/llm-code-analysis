@@ -509,12 +509,12 @@ Look for ANY logic that could make the vulnerability unexploitable, including bu
 
 # Important Rules
 
-* **Scope**: Only analyze the current function's code. Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find blocking logic in the current function, before the call to the next function.
+* **Scope**: Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find any blocking logic in the current function (including any other processing functions it calls) from its start up to the point where the next function in the call chain is called.
+* **Read When Needed**: If understanding the data flow or determining whether certain methods have filtering inside requires reading other files, read them. Do not guess or assume.
 * **Relevance**: Only report logic that affects the specified source-to-target data flow.
 * **Be Specific**: Provide exact file paths and line numbers.
 * **Comprehensive**: Consider ALL types of logic, not just security-related ones.
 * **Conservative**: When uncertain if something could prevent exploitation, include it.
-* **Read When Needed**: If understanding the data flow requires reading other files, read them. Do not guess or assume.
 
 # Restrictions
 
