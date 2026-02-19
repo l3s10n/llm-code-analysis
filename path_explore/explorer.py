@@ -181,17 +181,25 @@ class FunctionExplorer:
                 interest_expressions
             )
 
-            for info in interest_infos:
-                interest_node = FunctionNode(
-                    function_name=info.function_name,
-                    file_path=info.file_path,
-                    source_code=info.source_code,
-                    tag=NodeTag.INTEREST,
-                    extra_info=""
-                )
-                node.add_child(interest_node)
-                self.node_count += 1
-                log_success("Explorer", f"Added interest node: {info.function_name} in {info.file_path}")
+            if interest_infos:
+                for info in interest_infos:
+                    interest_node = FunctionNode(
+                        function_name=info.function_name,
+                        file_path=info.file_path,
+                        source_code=info.source_code,
+                        tag=NodeTag.INTEREST,
+                        extra_info=""
+                    )
+                    node.add_child(interest_node)
+                    self.node_count += 1
+                    log_success("Explorer", f"Added interest node: {info.function_name} in {info.file_path}")
+            else:
+                log_warning("Explorer", f"interest_info_find_agent returned no implementations for {len(interest_hops)} interest expression(s)")
+
+        # Check if node has no children after exploration (should be pruned)
+        if node.is_leaf():
+            log_warning("Explorer", f"Node {node.function_name} has no children after exploration, pruning")
+            self._prune_branch(node)
 
         # Update tree display and clear current node highlighting
         clear_current_node()
@@ -269,7 +277,10 @@ class FunctionExplorer:
             assert self.root is not None
 
             # Step 2: DFS exploration loop
+            iteration_count = 0
             while has_unexplored_interest_nodes(self.root):
+                iteration_count += 1
+
                 # Check node count limit
                 if self.node_count >= self.max_nodes:
                     log_warning("Explorer", f"Reached max node limit ({self.max_nodes}), stopping")
@@ -279,6 +290,7 @@ class FunctionExplorer:
                 current_node = find_first_interest_leaf(self.root)
 
                 if current_node is None:
+                    log_info("Explorer", "No more Interest leaf nodes to explore")
                     break
 
                 # Check depth limit
@@ -288,12 +300,26 @@ class FunctionExplorer:
                     self._prune_branch(current_node)
                     continue
 
+                # Log current exploration status
+                log_info("Explorer", f"[Iteration {iteration_count}] Exploring node at depth {current_depth}: {current_node.function_name}")
+
                 # Explore this node
                 self.explore_node(current_node)
                 update_stats(self.node_count)
 
+            # Exploration loop completed
+            log_info("Explorer", f"Exploration loop completed after {iteration_count} iterations")
+
             # Step 3: Extract and store vulnerability paths
-            self._extract_vulnerability_paths()
+            log_info("Explorer", "Extracting vulnerability paths...")
+            try:
+                self._extract_vulnerability_paths()
+                log_info("Explorer", f"Extracted {len(self.vulnerability_paths)} vulnerability path(s)")
+            except Exception as extract_error:
+                log_error("Explorer", f"Error extracting paths: {extract_error}")
+                # Continue with empty paths
+
+            log_info("Explorer", "Stopping TUI...")
 
         except Exception as e:
             import traceback
@@ -305,6 +331,7 @@ class FunctionExplorer:
             return []
 
         # Stop TUI and print summary
+        log_info("Explorer", "Exploration phase completed successfully")
         stop_tui()
 
         # Append exploration result to log before closing
@@ -337,9 +364,12 @@ Summary:
 {'#' * 78}
 """
             append_to_log(result_content)
+            log_info("Explorer", "Exploration result appended to log")
 
         close_logger()
+        log_info("Explorer", "Printing summary...")
         self._print_summary()
+        log_info("Explorer", "Exploration phase done, returning results")
         return self.vulnerability_paths
 
     def _print_error_detail(self, error: Exception, traceback_str: str) -> None:
