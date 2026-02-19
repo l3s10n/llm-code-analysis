@@ -50,10 +50,12 @@ class PotentialPath:
         vulnerability_type: Type of vulnerability (PathTraversal or CommandInjection)
         sink_expression: The expression where the sink is called
         path: List of PathNode from source to sink (excluding sink marker)
+        interface_name: The API interface being analyzed (e.g., /api/readFile)
     """
     vulnerability_type: str
     sink_expression: str
     path: List[PathNode] = field(default_factory=list)
+    interface_name: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> 'PotentialPath':
@@ -61,7 +63,7 @@ class PotentialPath:
         Create PotentialPath from dictionary (JSON format).
 
         Args:
-            data: Dictionary with 'Type', 'SinkExpression', and 'Path' keys
+            data: Dictionary with 'InterfaceName', 'Type', 'SinkExpression', and 'Path' keys
 
         Returns:
             PotentialPath instance
@@ -71,6 +73,7 @@ class PotentialPath:
             for node_data in data.get('Path', [])
         ]
         return cls(
+            interface_name=data.get('InterfaceName', ''),
             vulnerability_type=data.get('Type', ''),
             sink_expression=data.get('SinkExpression', ''),
             path=path_nodes
@@ -185,6 +188,7 @@ class VerificationResult:
         vulnerability_type: Type of vulnerability being verified (maps to 'Type')
         sink_expression: The sink expression from the original path (maps to 'SinkExpression')
         path: List of PathNode from source to sink (maps to 'Path')
+        interface_name: The API interface being analyzed (maps to 'InterfaceName')
 
         is_vulnerable: Whether the path contains an exploitable vulnerability
         confidence: Confidence level (High, Medium, Low)
@@ -197,6 +201,7 @@ class VerificationResult:
     vulnerability_type: str  # Maps to 'Type'
     sink_expression: str     # Maps to 'SinkExpression'
     path: List[PathNode] = field(default_factory=list)  # Maps to 'Path'
+    interface_name: str = ""  # Maps to 'InterfaceName'
 
     # Verification result fields
     is_vulnerable: bool = False
@@ -213,6 +218,7 @@ class VerificationResult:
 
         Output format is based on explore module's output with additional fields:
         {
+            "InterfaceName": "/api/readFile",
             "Type": "PathTraversal",
             "SinkExpression": "...",
             "Path": [...],
@@ -228,6 +234,7 @@ class VerificationResult:
         """
         return {
             # Fields from explore module output
+            "InterfaceName": self.interface_name,
             "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
             "Path": [

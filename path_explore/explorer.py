@@ -25,7 +25,7 @@ from common.tui import (
     clear_current_node,
     print_summary
 )
-from common.agent_logger import init_logger, close_logger
+from common.agent_logger import init_logger, close_logger, append_to_log
 from .models import (
     FunctionNode,
     NodeTag,
@@ -80,12 +80,10 @@ class FunctionExplorer:
             self.project_name = project_name
         else:
             target_path_obj = Path(target_path)
-            self.project_name = target_path_obj.name if target_path_obj.name else target_path_obj.parent.name
+            self.project_name = target_path_obj.name
 
-        # Sanitize interface name for logging
+        # Sanitize interface name for directory naming
         self.interface_name = target_endpoint.strip('/').replace('/', '_')
-        if not self.interface_name:
-            self.interface_name = "root"
 
     def initialize(self) -> bool:
         """
@@ -308,6 +306,38 @@ class FunctionExplorer:
 
         # Stop TUI and print summary
         stop_tui()
+
+        # Append exploration result to log before closing
+        if self.root:
+            # Count by type
+            path_traversal_count = sum(
+                1 for p in self.vulnerability_paths
+                if p.vulnerability_type == "PathTraversal"
+            )
+            command_injection_count = sum(
+                1 for p in self.vulnerability_paths
+                if p.vulnerability_type == "CommandInjection"
+            )
+
+            result_content = f"""
+{'#' * 78}
+#{' ' * 76}#
+#{'EXPLORATION RESULT'.center(76)}#
+#{' ' * 76}#
+{'#' * 78}
+
+Exploration Tree:
+{self.root.to_tree_string()}
+
+Summary:
+  Total Paths: {len(self.vulnerability_paths)}
+  - PathTraversal: {path_traversal_count}
+  - CommandInjection: {command_injection_count}
+
+{'#' * 78}
+"""
+            append_to_log(result_content)
+
         close_logger()
         self._print_summary()
         return self.vulnerability_paths
@@ -357,7 +387,8 @@ class FunctionExplorer:
             vuln_path = VulnerabilityPath(
                 vulnerability_type=vuln_type,
                 sink_expression=sink_node.extra_info,
-                path=path_data
+                path=path_data,
+                interface_name=self.target_endpoint
             )
             self.vulnerability_paths.append(vuln_path)
 
@@ -443,21 +474,19 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get project name from target path (last component of path)
+    # Get project name from target path
     target_path = Path(args.target_path)
-    project_name = target_path.name if target_path.name else target_path.parent.name
+    project_name = target_path.name
 
-    # Sanitize endpoint name for filename (replace / with _)
-    endpoint_name = args.target_endpoint.strip('/').replace('/', '_')
-    if not endpoint_name:
-        endpoint_name = "root"
+    # Sanitize interface name for directory name
+    interface_name = args.target_endpoint.strip('/').replace('/', '_')
 
-    # Build output path: results/<project_name>/potential_paths/<endpoint>.json
-    output_dir = Path("results") / project_name / "potential_paths"
+    # Build output path: results/<project_name>/<interface_name>/potential_paths.json
+    output_dir = Path("results") / project_name / interface_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"{endpoint_name}.json"
+    output_file = output_dir / "potential_paths.json"
 
-    # Create and run explorer with project name for logging
+    # Create and run explorer
     explorer = FunctionExplorer(
         target_path=args.target_path,
         target_endpoint=args.target_endpoint,

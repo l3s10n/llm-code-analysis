@@ -71,6 +71,41 @@ class FunctionNode:
             current = current.parent
         return list(reversed(path))
 
+    def to_tree_string(self, indent: int = 0, is_last: bool = True) -> str:
+        """
+        Generate a tree-style string representation of this node and its children.
+
+        Args:
+            indent: Current indentation level
+            is_last: Whether this node is the last child of its parent
+
+        Returns:
+            A formatted string representing the tree structure
+        """
+        import os
+
+        # Build prefix for tree visualization
+        prefix = "    " * indent
+        if indent > 0:
+            prefix += "└── " if is_last else "├── "
+
+        # Build node display string
+        if self.is_sink():
+            node_display = "Sink"
+        else:
+            # Get filename without path
+            filename = os.path.basename(self.file_path) if self.file_path else "?"
+            node_display = f"{filename}#{self.function_name}"
+
+        result = f"{prefix}{node_display}\n"
+
+        # Recursively add children
+        for i, child in enumerate(self.children):
+            is_last_child = (i == len(self.children) - 1)
+            result += child.to_tree_string(indent + 1, is_last_child)
+
+        return result
+
 
 @dataclass
 class NextHopResult:
@@ -124,14 +159,17 @@ class VulnerabilityPath:
         vulnerability_type: Type of vulnerability (PathTraversal or CommandInjection)
         sink_expression: The expression where the sink is called
         path: List of (file_path, function_name, source_code) tuples from source to sink
+        interface_name: The API interface being analyzed (e.g., /api/readFile)
     """
     vulnerability_type: str
     sink_expression: str
     path: List[tuple]  # List of (file_path, function_name, source_code)
+    interface_name: str = ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
+            "InterfaceName": self.interface_name,
             "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
             "Path": [{"file": p[0], "name": p[1], "source_code": p[2]} for p in self.path]

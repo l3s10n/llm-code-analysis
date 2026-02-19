@@ -7,21 +7,16 @@ analysis pipeline, which consists of:
 2. Path Verification (path_verify): Verify if the paths contain exploitable vulnerabilities
 
 Usage:
-    # Analyze a single endpoint
-    python main.py <project_path> --endpoint <endpoint>
-
-    # Analyze all endpoints in the project (not implemented yet)
-    python main.py <project_path>
+    python main.py <project_path> <interface>
 
 Examples:
-    python main.py ./testProject --endpoint /api/readFile
-    python main.py ./my-project --endpoint /example/upload
+    python main.py ./testProject /api/readFile
+    python main.py ./my-project /example/upload
 """
 
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
 
 from path_explore.explorer import FunctionExplorer
 from path_verify.verify import PathVerifier
@@ -31,7 +26,7 @@ def analyze_single_endpoint(
     target_path: str,
     target_endpoint: str,
     project_name: str,
-    output_dir: Path
+    output_base_dir: str = "results"
 ) -> bool:
     """
     Analyze a single API endpoint for vulnerabilities.
@@ -44,23 +39,19 @@ def analyze_single_endpoint(
         target_path: Path to the target project's source code
         target_endpoint: The API endpoint to analyze (e.g., /api/readFile)
         project_name: Name of the project (used for output directory)
-        output_dir: Base output directory for results
+        output_base_dir: Base directory for results (default: "results")
 
     Returns:
         True if analysis completed successfully, False otherwise
     """
-    # Sanitize endpoint name for filename
-    endpoint_name = target_endpoint.strip('/').replace('/', '_')
-    if not endpoint_name:
-        endpoint_name = "root"
+    # Sanitize interface name for directory name
+    interface_name = target_endpoint.strip('/').replace('/', '_')
 
-    # Define output paths
-    potential_paths_output = output_dir / "potential_paths" / f"{endpoint_name}.json"
-    verified_paths_output = output_dir / "verified_paths" / f"{endpoint_name}.json"
+    # Define output paths: results/<project_name>/<interface_name>/
+    interface_output_dir = Path(output_base_dir) / project_name / interface_name
+    interface_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure output directories exist
-    potential_paths_output.parent.mkdir(parents=True, exist_ok=True)
-    verified_paths_output.parent.mkdir(parents=True, exist_ok=True)
+    potential_paths_output = interface_output_dir / "potential_paths.json"
 
     # =========================================================================
     # Phase 1: Path Exploration
@@ -69,7 +60,7 @@ def analyze_single_endpoint(
     print("PHASE 1: Path Exploration - Discovering Potential Vulnerability Paths")
     print("=" * 60)
     print(f"Target Project: {target_path}")
-    print(f"Target Endpoint: {target_endpoint}")
+    print(f"Target Interface: {target_endpoint}")
     print(f"Output: {potential_paths_output}")
     print()
 
@@ -100,17 +91,26 @@ def analyze_single_endpoint(
     print("PHASE 2: Path Verification - Analyzing Potential Vulnerabilities")
     print("=" * 60)
     print(f"Input: {potential_paths_output}")
-    print(f"Output: {verified_paths_output}")
-    print()
 
-    # Create and run verifier
+    # Create verifier
     verifier = PathVerifier(
         target_path=target_path,
         potential_paths_file=str(potential_paths_output),
         project_name=project_name
     )
 
-    # Run verification
+    # Load paths first to get interface_name for output path
+    if not verifier.load_paths():
+        print("[Error] Failed to load potential paths for verification")
+        return False
+
+    # Build output path from interface_name in potential_paths.json
+    assert verifier.interface_name is not None
+    verified_paths_output = Path(output_base_dir) / project_name / verifier.interface_name / "verified_paths.json"
+    print(f"Output: {verified_paths_output}")
+    print()
+
+    # Run verification (paths already loaded)
     verification_results = verifier.run_verification()
 
     if verification_results:
@@ -134,72 +134,19 @@ def analyze_single_endpoint(
     return True
 
 
-def analyze_all_endpoints(
-    target_path: str,
-    project_name: str,
-    output_dir: Path
-) -> bool:
-    """
-    Analyze all API endpoints in the project for vulnerabilities.
-
-    This function discovers all endpoints in the project and runs the complete
-    vulnerability analysis pipeline for each one.
-
-    TODO: This function is not implemented yet. It will:
-    1. Scan the project to discover all API endpoints
-    2. For each endpoint, run analyze_single_endpoint()
-
-    Args:
-        target_path: Path to the target project's source code
-        project_name: Name of the project (used for output directory)
-        output_dir: Base output directory for results
-
-    Returns:
-        True if analysis completed successfully, False otherwise
-    """
-    print("\n" + "=" * 60)
-    print("ANALYZE ALL ENDPOINTS - Not Implemented Yet")
-    print("=" * 60)
-    print(f"Target Project: {target_path}")
-    print(f"Project Name: {project_name}")
-    print()
-    print("[Info] This feature is not yet implemented.")
-    print("[Info] Please use --endpoint option to analyze a specific endpoint.")
-    print()
-    print("Planned implementation:")
-    print("  1. Scan project for all API endpoints (Spring MVC, JAX-RS, etc.)")
-    print("  2. For each discovered endpoint, run the analysis pipeline")
-    print("  3. Aggregate results across all endpoints")
-    print("=" * 60)
-
-    # TODO: Implement endpoint discovery and batch analysis
-    # Steps:
-    # 1. Use an endpoint discovery agent to find all @RequestMapping, @GetMapping, etc.
-    # 2. Collect all endpoints into a list
-    # 3. Iterate and call analyze_single_endpoint for each
-
-    return False
-
-
 def main():
     """
     Main entry point for the GOLD MINER CLI.
 
     Parses command line arguments and runs the vulnerability analysis pipeline.
-    Supports two modes:
-    1. Single endpoint analysis: --endpoint option specified
-    2. All endpoints analysis: no --endpoint option (not implemented yet)
     """
     parser = argparse.ArgumentParser(
         description='GOLD MINER - LLM-based White-box Vulnerability Discovery Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Analyze a single endpoint
-  python main.py ./testProject --endpoint /api/readFile
-
-  # Analyze all endpoints in the project (not implemented yet)
-  python main.py ./testProject
+  python main.py ./testProject /api/readFile
+  python main.py ./my-project /example/upload
         """
     )
 
@@ -210,19 +157,9 @@ Examples:
     )
 
     parser.add_argument(
-        '--endpoint',
-        '-e',
+        'interface',
         type=str,
-        default=None,
-        help='The API endpoint to analyze (e.g., /api/readFile). If not specified, all endpoints will be analyzed (not implemented yet).'
-    )
-
-    parser.add_argument(
-        '--output-dir',
-        '-o',
-        type=str,
-        default=None,
-        help='Custom output directory (default: results/<project_name>)'
+        help='The API interface to analyze (e.g., /api/readFile)'
     )
 
     args = parser.parse_args()
@@ -234,30 +171,14 @@ Examples:
 
     # Derive project name from target path
     target_path_obj = Path(args.project_path)
-    project_name = target_path_obj.name if target_path_obj.name else target_path_obj.parent.name
+    project_name = target_path_obj.name
 
-    # Determine output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        output_dir = Path("results") / project_name
-
-    # Run appropriate analysis based on whether endpoint is specified
-    if args.endpoint:
-        # Single endpoint analysis
-        success = analyze_single_endpoint(
-            target_path=args.project_path,
-            target_endpoint=args.endpoint,
-            project_name=project_name,
-            output_dir=output_dir
-        )
-    else:
-        # All endpoints analysis (not implemented yet)
-        success = analyze_all_endpoints(
-            target_path=args.project_path,
-            project_name=project_name,
-            output_dir=output_dir
-        )
+    # Run analysis
+    success = analyze_single_endpoint(
+        target_path=args.project_path,
+        target_endpoint=args.interface,
+        project_name=project_name
+    )
 
     sys.exit(0 if success else 1)
 

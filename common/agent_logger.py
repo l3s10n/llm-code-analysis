@@ -85,36 +85,42 @@ class AgentLogger:
         Returns:
             Full path to the log file
         """
-        # Sanitize interface name for filename
+        # Sanitize interface name for directory name
         safe_interface_name = self.interface_name.strip('/').replace('/', '_')
         if not safe_interface_name:
             safe_interface_name = "root"
 
-        # Build path based on log type
+        # Determine log filename based on log type
         if self.log_type == "path_explore":
-            log_subdir = "path_explore_logs"
+            log_filename = "path_explore.log"
         elif self.log_type == "path_verify":
-            log_subdir = "path_verify_logs"
+            log_filename = "path_verify.log"
         else:
-            log_subdir = f"{self.log_type}_logs"
+            log_filename = f"{self.log_type}.log"
 
-        # Filename: <interface_name>_<timestamp>.log
-        filename = f"{safe_interface_name}_{self.timestamp}.log"
-
-        # Full path: logs/<project_name>/<log_subdir>/<filename>
-        log_path = Path(self.base_dir) / self.project_name / log_subdir / filename
+        # Full path: logs/<project_name>/<interface_name>/<log_filename>
+        log_path = Path(self.base_dir) / self.project_name / safe_interface_name / log_filename
 
         return str(log_path)
 
     def _write_header(self) -> None:
         """Write the header to the log file."""
-        header = f"""GOLD MINER Agent Log
-{'=' * 80}
+        if self.log_type == "path_explore":
+            title = "GOLD MINER - Path Exploration"
+        elif self.log_type == "path_verify":
+            title = "GOLD MINER - Path Verification"
+        else:
+            title = f"GOLD MINER - {self.log_type}"
+
+        header = f"""{'#' * 78}
+#{' ' * 76}#
+#{title.center(76)}#
+#{' ' * 76}#
+{'#' * 78}
+
 Project: {self.project_name}
 Interface: {self.interface_name}
-Log Type: {self.log_type}
-Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-{'=' * 80}
+Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 """
         with open(self.log_file_path, 'w', encoding='utf-8') as f:
@@ -185,6 +191,16 @@ Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             f"{self.SECTION_SEPARATOR}"
         )
         return entry
+
+    def append_content(self, content: str) -> None:
+        """
+        Append custom content to the log file.
+
+        Args:
+            content: The content string to append
+        """
+        with open(self.log_file_path, 'a', encoding='utf-8') as f:
+            f.write(content)
 
 
 # =============================================================================
@@ -270,3 +286,19 @@ def close_logger() -> None:
 
     with _logger_lock:
         _logger_instance = None
+
+
+def append_to_log(content: str) -> None:
+    """
+    Append custom content to the log file.
+
+    This is a convenience function that uses the global logger instance.
+    If the logger is not initialized, this function does nothing.
+
+    Args:
+        content: The content string to append to the log file
+    """
+    global _logger_instance
+
+    if _logger_instance is not None:
+        _logger_instance.append_content(content)

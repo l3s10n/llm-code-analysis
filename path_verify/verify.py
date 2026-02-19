@@ -26,7 +26,7 @@ from common.tui import (
     update_verify_stats,
     print_verify_summary
 )
-from common.agent_logger import init_logger, close_logger
+from common.agent_logger import init_logger, close_logger, append_to_log
 
 from .models import (
     PotentialPath,
@@ -91,15 +91,16 @@ class PathVerifier:
             self.project_name = project_name
         else:
             target_path_obj = Path(target_path)
-            self.project_name = target_path_obj.name if target_path_obj.name else target_path_obj.parent.name
+            self.project_name = target_path_obj.name
 
-        # Extract interface name from the potential paths file
-        paths_file = Path(potential_paths_file)
-        self.interface_name = paths_file.stem  # filename without extension
+        # Interface name will be set after loading potential paths
+        self.interface_name: Optional[str] = None
 
     def load_paths(self) -> bool:
         """
         Load potential paths from the JSON file.
+
+        Also extracts the interface_name from the JSON for logging and output paths.
 
         Returns:
             True if paths loaded successfully, False otherwise
@@ -109,6 +110,11 @@ class PathVerifier:
         try:
             self.potential_paths = load_potential_paths(self.potential_paths_file)
             log_success("Verifier", f"Loaded {len(self.potential_paths)} potential path(s)")
+
+            # Extract interface_name from the first path for directory naming
+            interface_raw = self.potential_paths[0].interface_name
+            self.interface_name = interface_raw.strip('/').replace('/', '_')
+
             return True
         except FileNotFoundError:
             log_error("Verifier", f"File not found: {self.potential_paths_file}")
@@ -138,6 +144,7 @@ class PathVerifier:
 
         # Initialize result with path info from explore module output
         result = VerificationResult(
+            interface_name=path.interface_name,
             vulnerability_type=path.vulnerability_type,
             sink_expression=path.sink_expression,
             path=path.path
@@ -263,6 +270,97 @@ class PathVerifier:
 
         return result
 
+    def _format_path_header(self, path: PotentialPath, path_index: int) -> str:
+        """
+        Format the path information header for logging.
+
+        Args:
+            path: The potential path to format
+            path_index: Current path index (1-based)
+
+        Returns:
+            Formatted string for path header
+        """
+        import os
+
+        # Build call chain with arrow
+        call_chain = " → ".join([node.name for node in path.path] + ["sink"])
+
+        # Build path nodes info
+        nodes_info = []
+        for j, node in enumerate(path.path):
+            short_file = os.path.basename(node.file) if node.file else "?"
+            nodes_info.append(f"  [{j}] {node.name}")
+            nodes_info.append(f"      File: {short_file}")
+
+        content = f"""
+{'#' * 78}
+#{' ' * 76}#
+#{f'VERIFICATION PATH #{path_index}'.center(76)}#
+#{' ' * 76}#
+{'#' * 78}
+
+Type: {path.vulnerability_type}
+Sink Expression: {path.sink_expression}
+
+Call Chain:
+  {call_chain}
+
+Path Nodes:
+{chr(10).join(nodes_info)}
+
+"""
+        return content
+
+    def _format_path_result(self, result: VerificationResult, path_index: int) -> str:
+        """
+        Format the verification result for logging.
+
+        Args:
+            result: The verification result
+            path_index: Current path index (1-based)
+
+        Returns:
+            Formatted string for result
+        """
+        status = "VULNERABLE" if result.is_vulnerable else "NOT VULNERABLE"
+
+        content = f"""
+{'#' * 78}
+#{' ' * 76}#
+#{f'VERIFICATION RESULT #{path_index}'.center(76)}#
+#{' ' * 76}#
+{'#' * 78}
+
+Status: {status}
+Confidence: {result.confidence}
+Summary: {result.summary}
+
+"""
+        return content
+
+    def _format_final_summary(self) -> str:
+        """
+        Format the final summary for logging.
+
+        Returns:
+            Formatted string for final summary
+        """
+        content = f"""
+{'#' * 78}
+#{' ' * 76}#
+#{'FINAL SUMMARY'.center(76)}#
+#{' ' * 76}#
+{'#' * 78}
+
+Total Analyzed: {len(self.verification_results)}
+Vulnerable: {self.vulnerable_count}
+Not Vulnerable: {self.not_vulnerable_count}
+
+{'#' * 78}
+"""
+        return content
+
     def run_verification(self) -> List[VerificationResult]:
         """
         Run the complete verification process for all potential paths.
@@ -270,12 +368,28 @@ class PathVerifier:
         Returns:
             List of VerificationResult objects
         """
-        # Initialize logger for this session
+        # Load potential paths if not already loaded
+        if not self.potential_paths:
+            if not self.load_paths():
+                print("[Error] Failed to load potential paths")
+                return []
+
+            if not self.potential_paths:
+                print("[Warning] No potential paths to verify")
+                return []
+
+        # Now initialize logger with interface_name from endpoint
+        # interface_name is guaranteed to be set after load_paths()
+        assert self.interface_name is not None
         init_logger(
             project_name=self.project_name,
             interface_name=self.interface_name,
             log_type="path_verify"
         )
+
+        # Append total paths info to log header
+        total_paths_info = f"Total Paths to Verify: {len(self.potential_paths)}\n\n"
+        append_to_log(total_paths_info)
 
         # Start TUI in verify mode
         start_tui(
@@ -285,15 +399,6 @@ class PathVerifier:
         )
 
         try:
-            # Load potential paths
-            if not self.load_paths():
-                log_error("Verifier", "Failed to load potential paths")
-                return []
-
-            if not self.potential_paths:
-                log_warning("Verifier", "No potential paths to verify")
-                return []
-
             # Log configuration info
             if self.verbose:
                 log_info("Config", f"Verbose mode enabled")
@@ -303,8 +408,16 @@ class PathVerifier:
             for i, path in enumerate(self.potential_paths, 1):
                 log_info("Verifier", f"Verifying path {i}/{total}: {path.get_call_chain_display()}")
 
+                # Write path header to log
+                path_header = self._format_path_header(path, i)
+                append_to_log(path_header)
+
                 result = self.verify_path(path, i, total)
                 self.verification_results.append(result)
+
+                # Write result to log
+                result_content = self._format_path_result(result, i)
+                append_to_log(result_content)
 
         except Exception as e:
             import traceback
@@ -317,6 +430,11 @@ class PathVerifier:
 
         # Stop TUI and print summary
         stop_tui()
+
+        # Write final summary to log
+        summary_content = self._format_final_summary()
+        append_to_log(summary_content)
+
         close_logger()
         print_verify_summary(self.vulnerable_count, self.not_vulnerable_count, len(self.verification_results))
         return self.verification_results
@@ -365,8 +483,8 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m path_verify.verify ./testProject results/test_project/potential_paths/api_readFile.json
-  python -m path_verify.verify ./my-project results/my_project/potential_paths/example.json
+  python -m path_verify.verify ./testProject results/testProject/api_readFile/potential_paths.json
+  python -m path_verify.verify ./my-project results/myProject/example/potential_paths.json
         """
     )
 
@@ -393,29 +511,31 @@ Examples:
 
     # Get project name from target path
     target_path = Path(args.target_path)
-    project_name = target_path.name if target_path.name else target_path.parent.name
+    project_name = target_path.name
 
-    # Build output path if not specified
-    if args.output:
-        output_file = args.output
-    else:
-        # Extract endpoint name from the potential paths file
-        paths_file = Path(args.potential_paths_file)
-        endpoint_name = paths_file.stem  # filename without extension
-
-        # Build output path: results/<project_name>/verified_paths/<endpoint>.json
-        output_dir = Path("results") / project_name / "verified_paths"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = str(output_dir / f"{endpoint_name}.json")
-
-    # Create and run verifier with project name for logging
+    # Create verifier instance
     verifier = PathVerifier(
         target_path=args.target_path,
         potential_paths_file=args.potential_paths_file,
         project_name=project_name
     )
 
-    # Run verification
+    # Load paths first to get interface_name for determining output path
+    if not verifier.load_paths():
+        print("[Error] Failed to load potential paths")
+        sys.exit(1)
+
+    # Build output path if not specified
+    if args.output:
+        output_file = args.output
+    else:
+        # Output path: results/<project_name>/<interface_name>/verified_paths.json
+        assert verifier.interface_name is not None
+        output_dir = Path("results") / project_name / verifier.interface_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = str(output_dir / "verified_paths.json")
+
+    # Run verification (paths already loaded, will use cached data)
     results = verifier.run_verification()
 
     # Export results
