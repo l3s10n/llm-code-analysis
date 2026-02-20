@@ -147,12 +147,12 @@ class TUIManger:
     # Explore Mode Methods
     # =========================================================================
 
-    def update_tree(self, root: 'FunctionNode') -> None:
+    def update_tree(self, root: Optional['FunctionNode']) -> None:
         """
         Update the exploration tree display.
 
         Args:
-            root: Root node of the exploration tree
+            root: Root node of the exploration tree, or None to clear the tree
         """
         with self.lock:
             self._tree_root = root
@@ -523,7 +523,7 @@ class TUIManger:
 
         # Find path to current node for smart rendering
         current_path = []
-        if self._current_node_key:
+        if self._current_node_key and self._tree_root:
             self._find_current_node_path(self._tree_root, current_path)
 
         # Determine which children to show
@@ -941,7 +941,7 @@ def stop_tui() -> None:
 # Convenience Functions - Explore Mode
 # =============================================================================
 
-def update_tree(root: 'FunctionNode') -> None:
+def update_tree(root: Optional['FunctionNode']) -> None:
     """Update the exploration tree display."""
     get_tui().update_tree(root)
 

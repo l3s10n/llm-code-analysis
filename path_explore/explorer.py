@@ -184,7 +184,22 @@ class FunctionExplorer:
             )
 
             if interest_infos:
+                # Build a set of (function_name, file_path) tuples from the call chain
+                # to filter out interests that would create cycles
+                visited_in_chain = set()
+                for chain_node in call_chain:
+                    # Only add non-sink nodes to the visited set
+                    if not chain_node.is_sink():
+                        visited_in_chain.add((chain_node.function_name, chain_node.file_path))
+
+                filtered_count = 0
                 for info in interest_infos:
+                    # Check if this interest is already in the call chain
+                    if (info.function_name, info.file_path) in visited_in_chain:
+                        log_warning("Explorer", f"Filtered cyclic interest: {info.function_name} in {info.file_path} (already in call chain)")
+                        filtered_count += 1
+                        continue
+
                     interest_node = FunctionNode(
                         function_name=info.function_name,
                         file_path=info.file_path,
@@ -195,6 +210,9 @@ class FunctionExplorer:
                     node.add_child(interest_node)
                     self.node_count += 1
                     log_success("Explorer", f"Added interest node: {info.function_name} in {info.file_path}")
+
+                if filtered_count > 0:
+                    log_info("Explorer", f"Filtered {filtered_count} cyclic interest(s) to prevent infinite loops")
             else:
                 log_warning("Explorer", f"interest_info_find_agent returned no implementations for {len(interest_hops)} interest expression(s)")
 
@@ -222,27 +240,30 @@ class FunctionExplorer:
         # Go up from node until we find an ancestor with multiple children
         current = node
         prune_from = node
+        found_multi_branch_parent = False
 
         while current.parent is not None:
             parent = current.parent
             if len(parent.children) > 1:
                 # Parent has other branches, only remove current's branch
                 prune_from = current
+                found_multi_branch_parent = True
                 break
             # Parent has only this child, continue up
             prune_from = current
             current = parent
 
-        # Remove the identified branch
-        if prune_from.parent is not None:
+        # Remove the identified branch or clear the entire tree
+        if found_multi_branch_parent:
             # Found an ancestor with other branches, prune this branch
             prune_from.parent.remove_child(prune_from)
             log_warning("Explorer", f"Pruned branch: No viable paths found from {prune_from.function_name}")
             update_tree(self.root)
         else:
-            # The entire tree is a single chain with no viable paths, clear it
+            # No multi-branch ancestor found, clear the entire tree
             log_warning("Explorer", "Entire exploration tree is a single chain with no viable paths, clearing tree")
             self.root = None
+            update_tree(None)
 
     def run_exploration(self) -> List[VulnerabilityPath]:
         """
@@ -317,6 +338,11 @@ class FunctionExplorer:
 
             # Exploration loop completed
             log_info("Explorer", f"Exploration loop completed after {iteration_count} iterations")
+
+            # Sync TUI state with final tree state before stopping
+            clear_current_node()
+            if self.root:
+                update_tree(self.root)
 
             # Step 3: Extract and store vulnerability paths
             log_info("Explorer", "Extracting vulnerability paths...")

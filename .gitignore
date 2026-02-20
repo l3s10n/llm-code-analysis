@@ -8,4 +8,4 @@ test/
 results/
 logs/
 cache/
-exp.py
+exp/
