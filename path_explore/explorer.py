@@ -153,7 +153,9 @@ class FunctionExplorer:
         # Separate sink and interest results
         sink_hops = [nh for nh in next_hops if nh.tag in (
             NodeTag.SINK_PATH_TRAVERSAL,
-            NodeTag.SINK_COMMAND_INJECTION
+            NodeTag.SINK_COMMAND_INJECTION,
+            NodeTag.SINK_CODE_INJECTION,
+            NodeTag.SINK_SQL_INJECTION
         )]
         interest_hops = [nh for nh in next_hops if nh.tag == NodeTag.INTEREST]
 
@@ -351,6 +353,14 @@ class FunctionExplorer:
                 1 for p in self.vulnerability_paths
                 if p.vulnerability_type == "CommandInjection"
             )
+            code_injection_count = sum(
+                1 for p in self.vulnerability_paths
+                if p.vulnerability_type == "CodeInjection"
+            )
+            sql_injection_count = sum(
+                1 for p in self.vulnerability_paths
+                if p.vulnerability_type == "SQLInjection"
+            )
 
             result_content = f"""
 {'#' * 78}
@@ -366,6 +376,8 @@ Summary:
   Total Paths: {len(self.vulnerability_paths)}
   - PathTraversal: {path_traversal_count}
   - CommandInjection: {command_injection_count}
+  - CodeInjection: {code_injection_count}
+  - SQLInjection: {sql_injection_count}
 
 {'#' * 78}
 """
@@ -410,6 +422,10 @@ Summary:
                 vuln_type = "PathTraversal"
             elif sink_node.tag == NodeTag.SINK_COMMAND_INJECTION:
                 vuln_type = "CommandInjection"
+            elif sink_node.tag == NodeTag.SINK_CODE_INJECTION:
+                vuln_type = "CodeInjection"
+            elif sink_node.tag == NodeTag.SINK_SQL_INJECTION:
+                vuln_type = "SQLInjection"
             else:
                 continue  # Not a sink, skip
 
@@ -441,11 +457,21 @@ Summary:
             1 for p in self.vulnerability_paths
             if p.vulnerability_type == "CommandInjection"
         )
+        code_injection_count = sum(
+            1 for p in self.vulnerability_paths
+            if p.vulnerability_type == "CodeInjection"
+        )
+        sql_injection_count = sum(
+            1 for p in self.vulnerability_paths
+            if p.vulnerability_type == "SQLInjection"
+        )
 
         # Use TUI to print summary
         print_summary(
             path_traversal_count=path_traversal_count,
             command_injection_count=command_injection_count,
+            code_injection_count=code_injection_count,
+            sql_injection_count=sql_injection_count,
             total_paths=len(self.vulnerability_paths)
         )
 

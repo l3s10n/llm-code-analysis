@@ -157,9 +157,11 @@ Analyze the data flow from the current function to the next function (or directl
 
 # Key Concepts
 
-* **Sink Semantics**: The critical data that determines the security impact - this refers to the INPUT (parameter or member variable) that carries the path/command semantic, not a parameter named "path" or "command":
+* **Sink Semantics**: The critical data that determines the security impact - this refers to the INPUT (parameter or member variable) that carries the path/command/code/sql semantic, not a parameter named "path" or "command":
   - For PathTraversal: The input that determines the file path being accessed
   - For CommandInjection: The input that determines the command being executed
+  - For CodeInjection: The input that determines the code being executed
+  - For SQLInjection: The input that determines the SQL query being executed
 * **Precise Field Tracking**: You must trace data flow to the most granular field level possible, not just parameter/member names.
 
 # Output Format
@@ -350,10 +352,12 @@ Your task is to trace the first part of this path:
 
 This function directly calls the sink: `{path.sink_expression}`
 
-Your task is to find which specific fields in `{current_node.name}` flow to the sink's key semantic input (the data that determines the path/command, which could be a parameter or member variable of the sink).
+Your task is to find which specific fields in `{current_node.name}` flow to the sink's key semantic input (the data that determines the path/command/code/sql, which could be a parameter or member variable of the sink).
 
 >>> For PathTraversal: trace which fields become the file path semantic
 >>> For CommandInjection: trace which fields become the command semantic
+>>> For CodeInjection: trace which fields become the code semantic
+>>> For SQLInjection: trace which fields become the SQL query semantic
 """
 
     user_prompt += f"""

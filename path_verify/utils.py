@@ -193,10 +193,14 @@ def print_verification_summary(results: List[VerificationResult]) -> None:
     # Breakdown by type
     path_traversal = sum(1 for r in results if r.vulnerability_type == "PathTraversal")
     command_injection = sum(1 for r in results if r.vulnerability_type == "CommandInjection")
+    code_injection = sum(1 for r in results if r.vulnerability_type == "CodeInjection")
+    sql_injection = sum(1 for r in results if r.vulnerability_type == "SQLInjection")
 
     print(f"\n  By Vulnerability Type:")
     print(f"    Path Traversal: {path_traversal}")
     print(f"    Command Injection: {command_injection}")
+    print(f"    Code Injection: {code_injection}")
+    print(f"    SQL Injection: {sql_injection}")
 
     # List vulnerable paths
     if vulnerable > 0:

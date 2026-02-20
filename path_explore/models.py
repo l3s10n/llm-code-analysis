@@ -15,10 +15,14 @@ class NodeTag(Enum):
     INTEREST: Node represents a function that may lead to sink functions
     SINK_PATH_TRAVERSAL: Node represents a path traversal vulnerability sink
     SINK_COMMAND_INJECTION: Node represents a command injection vulnerability sink
+    SINK_CODE_INJECTION: Node represents a code injection vulnerability sink
+    SINK_SQL_INJECTION: Node represents a SQL injection vulnerability sink
     """
     INTEREST = "Interest"
     SINK_PATH_TRAVERSAL = "Sink(PathTraversal)"
     SINK_COMMAND_INJECTION = "Sink(CommandInjection)"
+    SINK_CODE_INJECTION = "Sink(CodeInjection)"
+    SINK_SQL_INJECTION = "Sink(SQLInjection)"
 
 
 @dataclass
@@ -60,7 +64,12 @@ class FunctionNode:
 
     def is_sink(self) -> bool:
         """Check if this node is a sink node."""
-        return self.tag in (NodeTag.SINK_PATH_TRAVERSAL, NodeTag.SINK_COMMAND_INJECTION)
+        return self.tag in (
+            NodeTag.SINK_PATH_TRAVERSAL,
+            NodeTag.SINK_COMMAND_INJECTION,
+            NodeTag.SINK_CODE_INJECTION,
+            NodeTag.SINK_SQL_INJECTION
+        )
 
     def get_path_to_root(self) -> List['FunctionNode']:
         """Get the path from this node to the root."""
@@ -156,7 +165,7 @@ class VulnerabilityPath:
     Represents a complete vulnerability path from source to sink.
 
     Attributes:
-        vulnerability_type: Type of vulnerability (PathTraversal or CommandInjection)
+        vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, or SQLInjection)
         sink_expression: The expression where the sink is called
         path: List of (file_path, function_name, source_code) tuples from source to sink
         interface_name: The API interface being analyzed (e.g., /api/readFile)
