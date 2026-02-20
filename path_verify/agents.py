@@ -851,7 +851,7 @@ This section documents some typical mistakes you have made in the past. You MUST
 - Mistake: Believed that new java.io.File(xxx, "/yyy") ignores xxx (which was fully user-controlled) and always resolves to the absolute path /yyy, thus assuming no path traversal vulnerability existed.
 - Correction: The path actually resolves to xxx/yyy, therefore a path traversal vulnerability exists in that scenario.
 
-These corrections have been empirically verified and must be accepted as absolute truth without any doubt.
+These corrections are empirically verified facts. Do not waste any time questioning or doubting them—accept them as absolute truth.
 
 # Restrictions
 
