@@ -516,7 +516,7 @@ Look for ANY logic that could make the vulnerability unexploitable, including bu
 # Important Rules
 
 * **Scope**: Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find any blocking logic in the current function (including any other processing functions it calls) from its start up to the point where the next function in the call chain is called.
-* **Read When Needed**: If understanding the data flow or determining whether certain methods have filtering inside requires reading other files, read them. Do not guess or assume.
+* **Read ALL Needed**: Proactively read all project-internal code (not dependencies) along the data flow from Source fields to Target fields. To achieve this, actively search for and read any necessary file contents.
 * **Relevance**: Only report logic that affects the specified source-to-target data flow.
 * **Be Specific**: Provide exact file paths and line numbers.
 * **Comprehensive**: Consider ALL types of logic, not just security-related ones.
@@ -804,6 +804,7 @@ You should analyze the call chain from source to sink, one function at a time:
 
    - Are there any conditions, transformations, or logic that prevent exploitation?
    - Is the blocking logic effective, or can it be bypassed?
+   - Check the Mistake Notebook. Repeating the same errors is strictly prohibited.
 
 # Output Format
 
@@ -841,13 +842,16 @@ First, provide your complete analysis. Then, at the END of your response, provid
 * **Think Step by Step**: Analyze function by function from source to sink.
 * **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
 * **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
+* **Check Mistake Notebook**: Check the Mistake Notebook. Do NOT repeat the same errors documented there.
 
 # Mistake Notebook
 
-This section documents some typical mistakes you have made in the past. You should avoid repeating them:
+This section documents some typical mistakes you have made in the past. You MUST avoid repeating them:
 
 - Mistake: Believed that new java.io.File(xxx, "/yyy") ignores xxx (which was fully user-controlled) and always resolves to the absolute path /yyy, thus assuming no path traversal vulnerability existed.
 - Correction: The path actually resolves to xxx/yyy, therefore a path traversal vulnerability exists in that scenario.
+
+These corrections have been empirically verified and must be accepted as absolute truth without any doubt.
 
 # Restrictions
 
