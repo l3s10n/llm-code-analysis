@@ -162,6 +162,8 @@ Analyze the data flow from the current function to the next function (or directl
   - For CommandInjection: The input that determines the command being executed
   - For CodeInjection: The input that determines the code being executed
   - For SQLInjection: The input that determines the SQL query being executed
+* **Indirect Sink Semantics**: A parameter may carry the semantic indirectly if the sink's logic uses it to determine the final value. Example: `Runtime.exec("sh -c $CMD", envp)` - the `envp` parameter carries command semantic because the fixed command references `$CMD` from environment variables.
+* **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
 * **Precise Field Tracking**: You must trace data flow to the most granular field level possible, not just parameter/member names.
 
 # Output Format
@@ -795,7 +797,11 @@ You should analyze the call chain from source to sink, one function at a time:
    - A "blocking logic" identified earlier might be bypassable
 
 3. **Think about exploitability**:
-   - Can user input actually control the sink's key semantic (path/command)?
+   - Can user input actually control the sink's key semantic (path/command/code/sql)?
+
+   > **Indirect Semantics**: A parameter may carry path/command/code/sql semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
+   > **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
+
    - Are there any conditions, transformations, or logic that prevent exploitation?
    - Is the blocking logic effective, or can it be bypassed?
 
@@ -835,6 +841,13 @@ First, provide your complete analysis. Then, at the END of your response, provid
 * **Think Step by Step**: Analyze function by function from source to sink.
 * **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
 * **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
+
+# Mistake Notebook
+
+This section documents some typical mistakes you have made in the past. You should avoid repeating them:
+
+- Mistake: Believed that new java.io.File(xxx, "/yyy") ignores xxx (which was fully user-controlled) and always resolves to the absolute path /yyy, thus assuming no path traversal vulnerability existed.
+- Correction: The path actually resolves to xxx/yyy, therefore a path traversal vulnerability exists in that scenario.
 
 # Restrictions
 

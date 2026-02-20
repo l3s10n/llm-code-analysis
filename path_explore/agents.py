@@ -411,8 +411,10 @@ A sink function is defined as a function that meets the following conditions:
 
 1. Basic requirements: The function must be the next hop of the current function.
 2. Functional requirements: The function performs file operations (read, write, delete) / command execution / code execution / SQL query execution. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary functions, such as those used to generate paths/commands/code/SQL or to validate paths/commands/code/SQL, are not sink functions**.
+> **Indirect Semantics**: A parameter may carry path/command/code/sql semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
 3. Origin requirements: The function must be implemented in an external dependency rather than within the current project. Only functions defined in third-party libraries or framework code (i.e., not implemented in the project's own source code) qualify as sink functions. Functions implemented locally within the project, even if they perform file operations (read, write, delete) / command execution / code execution / SQL query execution, are excluded from consideration.
 4. Data flow requirements: The path/command/code/SQL used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
+> **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
 
 For sink functions, they need to be labeled as `Sink(PathTraversal)`, `Sink(CommandInjection)`, `Sink(CodeInjection)`, or `Sink(SQLInjection)` based on their type.
 
