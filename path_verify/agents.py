@@ -545,7 +545,7 @@ Look for ANY logic that could make the vulnerability unexploitable, including bu
 # Important Rules
 
 * **Scope**: Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find any blocking logic in the current function (including any other processing functions it calls) from its start up to the point where the next function in the call chain is called.
-* **Read ALL Needed**: Proactively read all project-internal code (not dependencies) along the data flow from Source fields to Target fields. To achieve this, actively search for and read any necessary file contents.
+* **Read ALL Needed (MANDATORY)**: You MUST read and analyze ALL project-internal code (not third-party dependencies) along the data flow from Source fields to Target fields. This is NOT optional - you are required to actively search for, locate, and read EVERY file that handles this data within the project. Failure to read any relevant internal code before analysis is unacceptable.
 * **Relevance**: Only report logic that affects the specified source-to-target data flow.
 * **Be Specific**: Provide exact file paths and line numbers.
 * **Comprehensive**: Consider ALL types of logic, not just security-related ones.
@@ -827,7 +827,9 @@ You should analyze the call chain from source to sink, one function at a time:
 
    - Are there any conditions, transformations, or logic that prevent exploitation?
    - Is the blocking logic effective, or can it be bypassed?
-   - Check the Mistake Notebook. Repeating the same errors is strictly prohibited.
+
+4. **Check the Mistake Notebook**:
+   - Repeating the same mistakes is strictly prohibited.
 
 # Output Format
 
@@ -865,7 +867,7 @@ First, provide your complete analysis. Then, at the END of your response, provid
 * **Think Step by Step**: Analyze function by function from source to sink.
 * **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
 * **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
-* **Check Mistake Notebook**: Check the Mistake Notebook. Do NOT repeat the same errors documented there.
+* **Check Mistake Notebook**: Check the Mistake Notebook. **Do NOT repeat the same mistakes documented there**.
 * **Strict Output Format**: Your final summary MUST be in the EXACT format specified at the end of your response. Any deviation from the required format is unacceptable.
 
 # Mistake Notebook
@@ -879,7 +881,7 @@ This section documents some typical mistakes you have made in the past. You MUST
 - Correction: HTTP header names are able to be controlled by the user and are able to contain arbitrary strings, including special characters.
 
 - Mistake: Believed that the second parameter of Runtime.exec (the envp array) could not be controlled to set specific environment variables, thus dismissing command injection via environment variables.
-- Correction: The envp parameter accepts strings in "VAR=value" format, allowing an attacker to set ANY environment variable to ANY value (e.g., "LD_PRELOAD=/tmp/evil.so"). This is a valid command injection vector.
+- Correction: If the envp array is user-controllable, entries in the format X=Y allow the user to set arbitrary environment variables to arbitrary values.
 
 These corrections are empirically verified facts. Do not waste any time questioning or doubting them—accept them as absolute truth.
 
