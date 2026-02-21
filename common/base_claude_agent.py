@@ -425,9 +425,6 @@ def base_claude_agent(
 
     for attempt in range(max_retries + 1):
         try:
-            if attempt > 0:
-                print(f"\n[Retry] Attempt {attempt + 1}/{max_retries + 1}...")
-
             # Execute with timeout
             # On first attempt: read from cache if available
             # On retry: don't read from cache (to avoid getting same invalid result)
@@ -452,14 +449,12 @@ def base_claude_agent(
                 last_error_message = "Agent returned None"
                 last_result = None
                 if attempt < max_retries:
-                    print(f"\n[Warning] Agent returned None, retrying...")
                     continue
             elif len(result) < 10:
                 last_error_type = "empty_result"
                 last_error_message = f"Agent returned result with only {len(result)} characters (minimum 10 required)"
                 last_result = result
                 if attempt < max_retries:
-                    print(f"\n[Warning] Agent returned short result ({len(result)} chars), retrying...")
                     continue
 
             # Success - save to cache if caching is enabled, then return the result
@@ -472,7 +467,6 @@ def base_claude_agent(
             last_error_message = f"Agent execution exceeded timeout of {timeout_seconds} seconds"
             last_result = None
             if attempt < max_retries:
-                print(f"\n[Warning] Agent timed out after {timeout_seconds}s, retrying...")
                 continue
 
         except Exception as e:
@@ -480,7 +474,6 @@ def base_claude_agent(
             last_error_message = f"{type(e).__name__}: {str(e)}"
             last_result = None
             if attempt < max_retries:
-                print(f"\n[Warning] Agent failed with error: {e}, retrying...")
                 continue
 
     # All retries exhausted - return failure result
