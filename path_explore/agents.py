@@ -6,9 +6,10 @@ Each agent performs a specialized code analysis task and returns structured resu
 """
 
 import re
+import sys
 from typing import List, Optional
 
-from common.base_claude_agent import base_claude_agent
+from common.base_claude_agent import base_claude_agent, AgentResult
 from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
 from common.agent_logger import log_agent_call
 
@@ -45,6 +46,36 @@ NOT_FOUND = "Not Found"
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
+    """
+    Handle agent execution failure by creating error file and exiting.
+
+    This function is called when base_claude_agent fails after all retries.
+    It creates an error file, prints the error message and exits the program.
+
+    Args:
+        agent_result: The failed AgentResult containing error details
+        agent_name: Name of the agent that failed (for logging)
+    """
+    from common.tui import stop_tui
+    from common.agent_logger import close_logger
+    from common.base_claude_agent import create_error_file
+
+    # Stop TUI if running
+    stop_tui()
+    close_logger()
+
+    # Create error file
+    error_file_path = create_error_file(agent_name, agent_result)
+
+    # Print error message
+    print(f"\n[Error] Agent '{agent_name}' failed: {agent_result.error_message}")
+    print(f"[Error] Error file created at: {error_file_path}")
+
+    # Exit with error code
+    sys.exit(1)
+
 
 def _parse_marked_section(text: str, start_marker: str, end_marker: str) -> Optional[str]:
     """
@@ -332,24 +363,18 @@ def source_info_find_agent(target_path: str, target_endpoint: str) -> Optional[S
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_SOURCE_INFO_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("source_info_find_agent", "error", "Agent returned no result")
-        log_error("source_info_find_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="source_info_find_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="None (agent returned no result)"
-        )
-        return None
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "source_info_find_agent")
+
+    result = agent_result.result
 
     # Parse response
     file_path = _parse_marked_section(result, MARKER_FILE_PATH_START, MARKER_FILE_PATH_END)
@@ -528,24 +553,18 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_SINK_NEXT_HOP_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("sink_next_hop_agent", "error", "Agent returned no result")
-        log_error("sink_next_hop_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="sink_next_hop_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="[] (agent returned no result)"
-        )
-        return []
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "sink_next_hop_agent")
+
+    result = agent_result.result
 
     # Parse response
     function_info_list = _parse_function_info_sections(result)
@@ -693,24 +712,18 @@ def interest_next_hop_agent(
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_INTEREST_NEXT_HOP_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("interest_next_hop_agent", "error", "Agent returned no result")
-        log_error("interest_next_hop_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="interest_next_hop_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="[] (agent returned no result)"
-        )
-        return []
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "interest_next_hop_agent")
+
+    result = agent_result.result
 
     # Parse response
     function_info_list = _parse_function_info_sections(result)
@@ -918,24 +931,18 @@ def interest_info_find_agent(
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_INTEREST_INFO_FIND_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("interest_info_find_agent", "error", "Agent returned no result")
-        log_error("interest_info_find_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="interest_info_find_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="[] (agent returned no result)"
-        )
-        return []
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "interest_info_find_agent")
+
+    result = agent_result.result
 
     # Parse response
     function_infos = _parse_function_info_blocks(result)

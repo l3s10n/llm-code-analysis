@@ -7,6 +7,13 @@ llm:
   api_key: ""
   model: ""
 
+# Agent settings
+agent:
+  # Timeout for each agent call in seconds
+  timeout_seconds: 600
+  # Maximum number of retries for failed agent calls
+  max_retries: 3
+
 # Exploration settings
 exploration:
   max_depth: 20

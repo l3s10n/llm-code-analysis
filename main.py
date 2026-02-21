@@ -75,14 +75,17 @@ def analyze_single_endpoint(
     vulnerability_paths = explorer.run_exploration()
 
     if not vulnerability_paths:
-        print("\n[Warning] No potential vulnerability paths found.")
-        print("[Info] Skipping verification phase.")
+        print("\n[Info] No potential vulnerability paths found.")
         return True
 
     # Export exploration results
     explorer.export_results(str(potential_paths_output))
 
     print(f"\n[Info] Found {len(vulnerability_paths)} potential vulnerability path(s)")
+
+    # No need to run Phase 2 without vulnerablity_paths
+    if len(vulnerability_paths) == 0:
+        return True
 
     # =========================================================================
     # Phase 2: Path Verification

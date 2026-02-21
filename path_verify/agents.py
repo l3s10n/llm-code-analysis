@@ -6,9 +6,10 @@ Each agent performs a specialized analysis task and returns structured results.
 """
 
 import re
+import sys
 from typing import List, Optional
 
-from common.base_claude_agent import base_claude_agent
+from common.base_claude_agent import base_claude_agent, AgentResult
 from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
 from common.agent_logger import log_agent_call
 
@@ -19,6 +20,40 @@ from .models import (
     FilterLogic,
     NodeDataflowRecord
 )
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
+    """
+    Handle agent execution failure by printing error and exiting.
+
+    This function is called when base_claude_agent fails after all retries.
+    It prints the error message and exits the program.
+
+    Args:
+        agent_result: The failed AgentResult containing error details
+        agent_name: Name of the agent that failed (for logging)
+    """
+    from common.tui import stop_tui
+    from common.agent_logger import close_logger
+    from common.base_claude_agent import create_error_file
+
+    # Stop TUI if running
+    stop_tui()
+    close_logger()
+
+    # Create error file
+    error_file_path = create_error_file(agent_name, agent_result)
+
+    # Print error message
+    print(f"\n[Error] Agent '{agent_name}' failed: {agent_result.error_message}")
+    print(f"[Error] Error file created at: {error_file_path}")
+
+    # Exit with error code
+    sys.exit(1)
 
 
 # =============================================================================
@@ -372,24 +407,18 @@ Output the specific fields (param.field.subfield or this.member.field.subfield) 
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_ONE_HOP_DATAFLOW_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("one_hop_dataflow_agent", "error", "Agent returned no result")
-        log_error("one_hop_dataflow_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="one_hop_dataflow_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="DataflowInfo() (agent returned no result)"
-        )
-        return DataflowInfo()
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "one_hop_dataflow_agent")
+
+    result = agent_result.result
 
     # Parse response
     parameters = _parse_list_section(result, MARKER_PARAMS_START, MARKER_PARAMS_END)
@@ -692,24 +721,18 @@ where sourceField is from the source fields list and targetField is from the tar
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_ONE_HOP_FILTER_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("one_hop_filter_agent", "error", "Agent returned no result")
-        log_error("one_hop_filter_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="one_hop_filter_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="[] (agent returned no result)"
-        )
-        return []
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "one_hop_filter_agent")
+
+    result = agent_result.result
 
     # Parse filter logic blocks
     filter_logics = _parse_filter_logics(result, node_index)
@@ -1041,24 +1064,18 @@ At the end, provide your final decision in the specified format.
     # Clear stream buffer and execute agent with streaming
     clear_stream()
 
-    result = base_claude_agent(
+    agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_FINAL_DECISION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         stream_callback=stream_agent
     )
 
-    if result is None:
-        update_agent("final_decision_agent", "error", "Agent returned no result")
-        log_error("final_decision_agent", "Agent returned no result")
-        # Log the failed call
-        log_agent_call(
-            agent_name="final_decision_agent",
-            user_prompt=user_prompt,
-            model_output=None,
-            parsed_result="(False, 'Low', 'Agent failed to produce result')"
-        )
-        return (False, "Low", "Agent failed to produce result")
+    # Handle agent failure
+    if not agent_result.success:
+        _handle_agent_failure(agent_result, "final_decision_agent")
+
+    result = agent_result.result
 
     # Parse response
     decision_str = _parse_marked_section(result, MARKER_DECISION_START, MARKER_DECISION_END)

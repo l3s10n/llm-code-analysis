@@ -27,6 +27,7 @@ from common.tui import (
     print_verify_summary
 )
 from common.agent_logger import init_logger, close_logger, append_to_log
+from common.base_claude_agent import set_error_context, clear_error_context
 
 from .models import (
     PotentialPath,
@@ -381,6 +382,10 @@ Not Vulnerable: {self.not_vulnerable_count}
         # Now initialize logger with interface_name from endpoint
         # interface_name is guaranteed to be set after load_paths()
         assert self.interface_name is not None
+
+        # Set error context for error file generation
+        set_error_context(self.project_name, self.interface_name)
+
         init_logger(
             project_name=self.project_name,
             interface_name=self.interface_name,
@@ -424,6 +429,7 @@ Not Vulnerable: {self.not_vulnerable_count}
             log_error("Verifier", f"Error: {type(e).__name__}: {str(e)}")
             stop_tui()
             close_logger()
+            clear_error_context()
             print("\n[Error Details]")
             print(traceback.format_exc())
             return []
@@ -436,6 +442,7 @@ Not Vulnerable: {self.not_vulnerable_count}
         append_to_log(summary_content)
 
         close_logger()
+        clear_error_context()
         print_verify_summary(self.vulnerable_count, self.not_vulnerable_count, len(self.verification_results))
         return self.verification_results
 

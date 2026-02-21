@@ -26,6 +26,7 @@ from common.tui import (
     print_summary
 )
 from common.agent_logger import init_logger, close_logger, append_to_log
+from common.base_claude_agent import set_error_context, clear_error_context
 from .models import (
     FunctionNode,
     NodeTag,
@@ -275,6 +276,9 @@ class FunctionExplorer:
         Returns:
             List of VulnerabilityPath objects representing discovered vulnerability paths
         """
+        # Set error context for error file generation
+        set_error_context(self.project_name, self.interface_name)
+
         # Initialize logger for this session
         init_logger(
             project_name=self.project_name,
@@ -361,6 +365,7 @@ class FunctionExplorer:
             # Stop TUI and print full traceback
             stop_tui()
             close_logger()
+            clear_error_context()
             self._print_error_detail(e, traceback.format_exc())
             return []
 
@@ -411,6 +416,7 @@ Summary:
             log_info("Explorer", "Exploration result appended to log")
 
         close_logger()
+        clear_error_context()
         log_info("Explorer", "Printing summary...")
         self._print_summary()
         log_info("Explorer", "Exploration phase done, returning results")
