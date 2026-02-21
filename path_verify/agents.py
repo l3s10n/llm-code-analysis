@@ -824,12 +824,12 @@ First, provide your complete analysis. Then, at the END of your response, provid
 --- summary end ---
 ```
 
-# Decision Guidelines
+## Decision Guidelines
 
 * **VULNERABLE**: User input can reach and control the sink's key semantic with no effective blocking, OR blocking logic can be bypassed.
 * **NOT VULNERABLE**: There is effective logic that prevents exploitation and cannot be bypassed.
 
-# Confidence Levels
+## Confidence Levels
 
 * **High**: Clear evidence, thorough analysis, minimal ambiguity.
 * **Medium**: Some uncertainty exists, but evidence leans in one direction.
@@ -843,6 +843,7 @@ First, provide your complete analysis. Then, at the END of your response, provid
 * **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
 * **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
 * **Check Mistake Notebook**: Check the Mistake Notebook. Do NOT repeat the same errors documented there.
+* **Strict Output Format**: Your final summary MUST be in the EXACT format specified at the end of your response. Any deviation from the required format is unacceptable.
 
 # Mistake Notebook
 
@@ -850,6 +851,12 @@ This section documents some typical mistakes you have made in the past. You MUST
 
 - Mistake: Believed that new java.io.File(xxx, "/yyy") ignores xxx (which was fully user-controlled) and always resolves to the absolute path /yyy, thus assuming no path traversal vulnerability existed.
 - Correction: The path actually resolves to xxx/yyy, therefore a path traversal vulnerability exists in that scenario.
+
+- Mistake: Believed that HTTP header names cannot contain special characters.
+- Correction: HTTP header names are able to be controlled by the user and are able to contain arbitrary strings, including special characters.
+
+- Mistake: Believed that the second parameter of Runtime.exec (the envp array) could not be controlled to set specific environment variables, thus dismissing command injection via environment variables.
+- Correction: The envp parameter accepts strings in "VAR=value" format, allowing an attacker to set ANY environment variable to ANY value (e.g., "LD_PRELOAD=/tmp/evil.so"). This is a valid command injection vector.
 
 These corrections are empirically verified facts. Do not waste any time questioning or doubting them—accept them as absolute truth.
 
