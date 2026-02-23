@@ -1,5 +1,5 @@
 """
-GOLD MINER - Main Entry Point
+VulSolver - Main Entry Point
 
 This module provides the main entry point for running the complete vulnerability
 analysis pipeline, which consists of:
@@ -139,12 +139,12 @@ def analyze_single_endpoint(
 
 def main():
     """
-    Main entry point for the GOLD MINER CLI.
+    Main entry point for the VulSolver CLI.
 
     Parses command line arguments and runs the vulnerability analysis pipeline.
     """
     parser = argparse.ArgumentParser(
-        description='GOLD MINER - LLM-based White-box Vulnerability Discovery Tool',
+        description='VulSolver - LLM-based White-box Vulnerability Discovery Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

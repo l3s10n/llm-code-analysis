@@ -1,4 +1,4 @@
-# GOLD MINER - Path Exploration Module
+# VulSolver - Path Exploration Module
 # This module implements the vulnerability path discovery functionality
 
 from .models import FunctionNode, NodeTag, VulnerabilityPath

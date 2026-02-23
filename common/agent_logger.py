@@ -1,5 +1,5 @@
 """
-Agent Logger module for GOLD MINER.
+Agent Logger module for VulSolver.
 
 Provides logging functionality for recording base_claude_agent input/output
 during path_explore and path_verify operations.
@@ -106,11 +106,11 @@ class AgentLogger:
     def _write_header(self) -> None:
         """Write the header to the log file."""
         if self.log_type == "path_explore":
-            title = "GOLD MINER - Path Exploration"
+            title = "VulSolver - Path Exploration"
         elif self.log_type == "path_verify":
-            title = "GOLD MINER - Path Verification"
+            title = "VulSolver - Path Verification"
         else:
-            title = f"GOLD MINER - {self.log_type}"
+            title = f"VulSolver - {self.log_type}"
 
         header = f"""{'#' * 78}
 #{' ' * 76}#

@@ -1,5 +1,5 @@
 """
-Common utilities for GOLD MINER.
+Common utilities for VulSolver.
 """
 
 from .config import load_config

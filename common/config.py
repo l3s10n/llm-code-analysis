@@ -1,5 +1,5 @@
 """
-Configuration module for GOLD MINER.
+Configuration module for VulSolver.
 
 Reads config.yaml from project root and provides key access via dot notation.
 """

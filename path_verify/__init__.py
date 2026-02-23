@@ -1,5 +1,5 @@
 """
-Path verification module for GOLD MINER.
+Path verification module for VulSolver.
 
 This module verifies whether potential vulnerability paths discovered by path_explore
 actually contain exploitable vulnerabilities.

@@ -1,5 +1,5 @@
 """
-Base Claude Agent module for GOLD MINER.
+Base Claude Agent module for VulSolver.
 
 Provides a wrapper around Claude Agent SDK for executing AI-powered analysis tasks.
 Supports streaming output via callback function, result caching, timeout handling,

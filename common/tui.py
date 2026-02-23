@@ -1,5 +1,5 @@
 """
-Terminal User Interface module for GOLD MINER.
+Terminal User Interface module for VulSolver.
 
 Provides a Rich-based TUI with three panels:
 - Left-top: Exploration tree (explore mode) or Call Chain (verify mode)
@@ -45,7 +45,7 @@ class TUIMode:
 
 class TUIManger:
     """
-    Manages the Terminal User Interface for GOLD MINER.
+    Manages the Terminal User Interface for VulSolver.
 
     This class provides a three-panel layout:
     - Left-top: Exploration tree (explore mode) or Call Chain (verify mode)

@@ -486,7 +486,7 @@ if __name__ == '__main__':
     from rich.console import Console
 
     parser = argparse.ArgumentParser(
-        description='GOLD MINER - Vulnerability Path Verification Tool',
+        description='VulSolver - Vulnerability Path Verification Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
