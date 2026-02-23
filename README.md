@@ -1,6 +1,6 @@
 English | [中文](./README_CN.md)
 
-# Introduction
+# VulSolver
 
 Large Language Models (LLMs) are being explored for vulnerability discovery because of their ability to understand code semantics—a capability lacking in traditional Static Application Security Testing (SAST) tools. A typical approach centers on constructing LLM-based agents, where the LLM acts as a brain, orchestrating tools and knowledge to identify vulnerabilities. However, this paradigm suffers from critical instability and inaccuracy due to LLMs' unpredictable outputs and severely degraded accuracy when processing large codebases. Certain approaches are SAST-centric, using LLMs to generate rules or validate alerts. While these approaches are more stable, they remain confined by SAST's inherent limitations and cannot fully leverage LLMs' semantic comprehension.
 
