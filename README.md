@@ -22,7 +22,7 @@ VulSolver currently supports detection of Path Traversal, Command Injection, Cod
 Install the required dependencies with the following command:
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 Then configure the model settings in `config.yaml`:
@@ -43,6 +43,8 @@ VulSolver performs in-depth code analysis at the interface level (HTTP endpoints
 ```python
 python3 main.py <target_project_root_directory> <target_interface_name> # Example: python3 main.py '/tmp/helloProject' '/sample/hello'
 ```
+
+**Note:** Avoid using `sudo` or running as the root user.
 
 During execution, VulSolver displays the analysis process in real-time via a TUI interface:
 

@@ -22,7 +22,7 @@ VulSolver 目前支持路径穿越、命令执行、代码执行和 SQL 注入�
 通过以下命令安装 VulSolver 的必要依赖：
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 在 `config.yaml` 配置文件中补充模型调用信息：
@@ -43,6 +43,8 @@ VulSolver 以接口（HTTP 接口、RPC 接口等入口）为维度深入分析�
 ```python
 python3 main.py <待分析项目根目录> <待分析项目接口名> # 例如：python3 main.py '/tmp/helloProject' '/sample/hello'
 ```
+
+**注意：** 请勿使用 `sudo` 或以 root 用户身份运行。
 
 执行过程中 VulSolver 会以 TUI 的形式实时展示模型分析过程：
 

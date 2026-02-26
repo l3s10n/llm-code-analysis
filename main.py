@@ -83,10 +83,6 @@ def analyze_single_endpoint(
 
     print(f"\n[Info] Found {len(vulnerability_paths)} potential vulnerability path(s)")
 
-    # No need to run Phase 2 without vulnerablity_paths
-    if len(vulnerability_paths) == 0:
-        return True
-
     # =========================================================================
     # Phase 2: Path Verification
     # =========================================================================
