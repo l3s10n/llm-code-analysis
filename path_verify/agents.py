@@ -823,10 +823,8 @@ You should analyze the call chain from source to sink, one function at a time:
 
 3. **Think about exploitability**:
    - Can user input actually control the sink's key semantic (path/command/code/sql/url)?
-
-   > **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
-   > **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql/url, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
-
+      - **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
+      - **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql/url, this creates an implicit data flow. Consider these channels when analyzing. Note: Such data flows may exist outside the current call chain; for example, if a database field read in the current call chain is used as a file write path, check if other endpoints allow users to set that field, making the current call chain exploitable. Ensure the analysis focuses on the exploitability of the current call chain.
    - Are there any conditions, transformations, or logic that prevent exploitation?
    - Is the blocking logic effective, or can it be bypassed?
 

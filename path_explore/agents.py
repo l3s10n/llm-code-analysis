@@ -504,7 +504,7 @@ Analyze strictly according to the steps in the Steps section, the end of your ou
 3. Check whether these potential sink functions meet all the requirements:
    3.1 Basic requirements: Ensure the function currently being analyzed is the next hop of the current function.
    3.2 Functional requirements: Ensure the function performs file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests.
-   3.3 Origin requirements: Ensure the sink function is not implemented in the current project. If the sink function is an interface called by the current function, analyze whether its implementation class is implemented in the current project.
+   3.3 Origin requirements: Ensure the sink function is NOT implemented in the current project. If the sink function is an interface called by the current function, analyze whether its implementation class is implemented in the current project. You should proactively confirm this matter.
    3.4 Data flow requirement:
     a) Determine how the sink function specifies the paths/commands/code/SQL/URLs for its operation.
     b) Whether the paths/commands/code/SQL/URLs come from the source's user input.
