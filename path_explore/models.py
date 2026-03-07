@@ -17,12 +17,14 @@ class NodeTag(Enum):
     SINK_COMMAND_INJECTION: Node represents a command injection vulnerability sink
     SINK_CODE_INJECTION: Node represents a code injection vulnerability sink
     SINK_SQL_INJECTION: Node represents a SQL injection vulnerability sink
+    SINK_SSRF: Node represents a Server-Side Request Forgery vulnerability sink
     """
     INTEREST = "Interest"
     SINK_PATH_TRAVERSAL = "Sink(PathTraversal)"
     SINK_COMMAND_INJECTION = "Sink(CommandInjection)"
     SINK_CODE_INJECTION = "Sink(CodeInjection)"
     SINK_SQL_INJECTION = "Sink(SQLInjection)"
+    SINK_SSRF = "Sink(SSRF)"
 
 
 @dataclass
@@ -68,7 +70,8 @@ class FunctionNode:
             NodeTag.SINK_PATH_TRAVERSAL,
             NodeTag.SINK_COMMAND_INJECTION,
             NodeTag.SINK_CODE_INJECTION,
-            NodeTag.SINK_SQL_INJECTION
+            NodeTag.SINK_SQL_INJECTION,
+            NodeTag.SINK_SSRF
         )
 
     def get_path_to_root(self) -> List['FunctionNode']:
@@ -165,7 +168,7 @@ class VulnerabilityPath:
     Represents a complete vulnerability path from source to sink.
 
     Attributes:
-        vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, or SQLInjection)
+        vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, SQLInjection, or SSRF)
         sink_expression: The expression where the sink is called
         path: List of (file_path, function_name, source_code) tuples from source to sink
         interface_name: The API interface being analyzed (e.g., /api/readFile)

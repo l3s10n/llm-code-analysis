@@ -15,7 +15,7 @@ Experiments demonstrate the exceptional performance of VulSolver in identifying 
 | Path Traversal | 98.88% | 100.00% | 97.74% | 0.9886 |
 | SQL Injection | 99.60% | 99.63% | 99.63% | 0.9963 |
 
-VulSolver currently supports detection of Path Traversal, Command Injection, Code Injection, and SQL Injection vulnerabilities, with ongoing development to expand coverage for additional vulnerability types.
+VulSolver currently supports detection of Path Traversal, Command Injection, Code Injection, SQL Injection, and SSRF vulnerabilities, with ongoing development to expand coverage for additional vulnerability types.
 
 # Installation and Configuration
 

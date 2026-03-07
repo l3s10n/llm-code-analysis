@@ -129,7 +129,7 @@ def _parse_function_info_sections(text: str) -> list:
 
     Returns:
         List of tuples (expression, tag) for each function info section.
-        Tag is one of: "Sink(PathTraversal)", "Sink(CommandInjection)", "Sink(CodeInjection)", "Sink(SQLInjection)", "Interest".
+        Tag is one of: "Sink(PathTraversal)", "Sink(CommandInjection)", "Sink(CodeInjection)", "Sink(SQLInjection)", "Sink(SSRF)", "Interest".
     """
     # Find all function info sections
     pattern = rf"{re.escape(MARKER_FUNCTION_INFO_START)}(.*?){re.escape(MARKER_FUNCTION_INFO_END)}"
@@ -163,6 +163,7 @@ def _tag_string_to_enum(tag_str: str) -> Optional[NodeTag]:
         "Sink(CommandInjection)": NodeTag.SINK_COMMAND_INJECTION,
         "Sink(CodeInjection)": NodeTag.SINK_CODE_INJECTION,
         "Sink(SQLInjection)": NodeTag.SINK_SQL_INJECTION,
+        "Sink(SSRF)": NodeTag.SINK_SSRF,
         "Interest": NodeTag.INTEREST
     }
     return tag_map.get(tag_str)
@@ -435,13 +436,13 @@ Based on the last function in the call chain provided by the user (i.e., the cur
 A sink function is defined as a function that meets the following conditions:
 
 1. Basic requirements: The function must be the next hop of the current function.
-2. Functional requirements: The function performs file operations (read, write, delete) / command execution / code execution / SQL query execution. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary functions, such as those used to generate paths/commands/code/SQL or to validate paths/commands/code/SQL, are not sink functions**.
-> **Indirect Semantics**: A parameter may carry path/command/code/sql semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
-3. Origin requirements: The function must be implemented in an external dependency rather than within the current project. Only functions defined in third-party libraries or framework code (i.e., not implemented in the project's own source code) qualify as sink functions. Functions implemented locally within the project, even if they perform file operations (read, write, delete) / command execution / code execution / SQL query execution, are excluded from consideration.
-4. Data flow requirements: The path/command/code/SQL used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
-> **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
+2. Functional requirements: The function performs file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests to external URLs. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary functions, such as those used to generate paths/commands/code/SQL/URLs or to validate paths/commands/code/SQL/URLs, are not sink functions**.
+> **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
+3. Origin requirements: The function must be implemented in an external dependency rather than within the current project. Only functions defined in third-party libraries or framework code (i.e., not implemented in the project's own source code) qualify as sink functions. Functions implemented locally within the project, even if they perform file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests, are excluded from consideration.
+4. Data flow requirements: The path/command/code/SQL/URL used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
+> **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql/url, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
 
-For sink functions, they need to be labeled as `Sink(PathTraversal)`, `Sink(CommandInjection)`, `Sink(CodeInjection)`, or `Sink(SQLInjection)` based on their type.
+For sink functions, they need to be labeled as `Sink(PathTraversal)`, `Sink(CommandInjection)`, `Sink(CodeInjection)`, `Sink(SQLInjection)`, or `Sink(SSRF)` based on their type.
 
 ## Sink Type Examples
 
@@ -467,6 +468,15 @@ Here are some examples of sink, but don't limit yourself to these examples:
   - EntityManager.createNativeQuery() with user input
   - MyBatis ${} interpolation (NOT #{} which is parameterized)
 
+* **SSRF**: HTTP requests where user input affects the request target (URL, domain, IP, etc.)
+  - URL.openConnection(), URL.openStream(), HttpURLConnection with user-controlled URL
+  - HttpClient.execute() with user-controlled URI
+  - RestTemplate.getForObject()/postForObject() with user-controlled URL
+  - OkHttpClient.newCall() with user-controlled URL
+  - Jsoup.connect() with user-controlled URL
+  - Apache HttpClient HttpGet/HttpPost with user-controlled URI
+  - Any HTTP client making requests to user-controlled URLs, domains, or IP addresses
+
 ## Output Format
 
 Analyze strictly according to the steps in the Steps section, the end of your output must include a summary in the following format:
@@ -475,13 +485,13 @@ Analyze strictly according to the steps in the Steps section, the end of your ou
 --- function info start ---
 <Called expression>
 --- Separator ---
-<Sink(PathTraversal) / Sink(CommandInjection) / Sink(CodeInjection) / Sink(SQLInjection)>
+<Sink(PathTraversal) / Sink(CommandInjection) / Sink(CodeInjection) / Sink(SQLInjection) / Sink(SSRF)>
 --- function info end ---
 
 --- function info start ---
 <Called expression>
 --- Separator ---
-<Sink(PathTraversal) / Sink(CommandInjection) / Sink(CodeInjection) / Sink(SQLInjection)>
+<Sink(PathTraversal) / Sink(CommandInjection) / Sink(CodeInjection) / Sink(SQLInjection) / Sink(SSRF)>
 --- function info end ---
 
 ...
@@ -493,11 +503,11 @@ Analyze strictly according to the steps in the Steps section, the end of your ou
 2. list all potential sink functions that are called as next hops by the current function.
 3. Check whether these potential sink functions meet all the requirements:
    3.1 Basic requirements: Ensure the function currently being analyzed is the next hop of the current function.
-   3.2 Functional requirements: Ensure the function performs file operations (read, write, delete) / command execution / code execution / SQL query execution.
+   3.2 Functional requirements: Ensure the function performs file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests.
    3.3 Origin requirements: Ensure the sink function is not implemented in the current project. If the sink function is an interface called by the current function, analyze whether its implementation class is implemented in the current project.
    3.4 Data flow requirement:
-    a) Determine how the sink function specifies the paths/commands/code/SQL for its operation.
-    b) Whether the paths/commands/code/SQL come from the source's user input.
+    a) Determine how the sink function specifies the paths/commands/code/SQL/URLs for its operation.
+    b) Whether the paths/commands/code/SQL/URLs come from the source's user input.
 4. Summarize and output the results according to the format above.
 
 # Important Rules
@@ -508,7 +518,7 @@ Analyze strictly according to the steps in the Steps section, the end of your ou
 * **Deduplicate Equivalent Sinks**: If multiple sink functions share the same vulnerability type AND equivalent exploitation conditions, return only ONE representative sink. Different processing applied to the key parameter before reaching different sinks may create different exploitation conditions — return all in such cases. You do NOT need to judge whether they are actually exploitable; your task is simply to determine whether the key parameters undergo the same processing flow.
   Example for deduplication: The current function calls both file read and file write operations using the same path variable with identical processing — return only ONE representative sink.
   Example against deduplication: The current function calls a file read using path, and also a file write using the same path, but path undergoes additional processing before the write — return BOTH as they may have different exploitability.
-* Focus only on file operations (read, write, delete) / command execution / code execution / SQL query execution. Do not concern yourself with other types of security risks.
+* Focus only on file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests. Do not concern yourself with other types of security risks.
 * <Called expression> should be taken directly from the source code of the current function, starting with the function name, e.g., getValue(temp.getPath()).
 * If the current node does not have any Sinks that meet the requirements, do not return `--- function info start ---` or `--- function info end ---`.
 
@@ -523,7 +533,7 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
     Find sink functions in the next hop of the current function.
 
     This agent examines the current function (last in call_chain) to identify
-    sink functions that perform file/command/code/SQL operations with user-controlled input.
+    sink functions that perform file/command/code/SQL/HTTP operations with user-controlled input.
 
     Args:
         target_path: Path to the target project's source code.
@@ -533,7 +543,7 @@ def sink_next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> Lis
     Returns:
         List of NextHopResult objects containing:
         - expression: The call expression (e.g., "readFile(userInput)")
-        - tag: NodeTag indicating Sink(PathTraversal), Sink(CommandInjection), Sink(CodeInjection), or Sink(SQLInjection)
+        - tag: NodeTag indicating Sink(PathTraversal), Sink(CommandInjection), Sink(CodeInjection), Sink(SQLInjection), or Sink(SSRF)
 
     Note:
         Results are filtered to only include functions whose names appear in
@@ -616,8 +626,8 @@ Interest functions are those that:
 
 A sink function is defined as a function that meets the following conditions:
 
-1. The function performs file operations (read, write, delete) / command execution / code execution / SQL query execution, with no further filtering internally. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary methods, such as those used to generate paths/commands/code/SQL or to validate paths/commands/code/SQL, are not sink functions**.
-2. The path/command/code/SQL used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
+1. The function performs file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests to external URLs, with no further filtering internally. Only functions containing the aforementioned logic meet the Functional requirements. **Some auxiliary methods, such as those used to generate paths/commands/code/SQL/URLs or to validate paths/commands/code/SQL/URLs, are not sink functions**.
+2. The path/command/code/SQL/URL used by this function for its operation (which may be located in its parameters, member variables of the instance it belongs to, etc.) comes from source's user input.
 
 ## Output Format
 
@@ -656,7 +666,7 @@ Interest
 
 * **Must be Next Hop**: For the call chain provided by the user, the interest function must be a function called by the current function. It is forbidden to provide any interest function that is not a next hop!
 * **Stop at Next Hop**: Your goal is to identify the interest function directly called by the current function. Do not analyze deeper into the next hop's code to find additional interest functions or verify whether a particular interest function actually calls a sink method.
-* Focus only on file operations (read, write, delete) / command execution / code execution / SQL query execution. Do not concern yourself with other types of security risks.
+* Focus only on file operations (read, write, delete) / command execution / code execution / SQL query execution / HTTP requests. Do not concern yourself with other types of security risks.
 * <Called expression> should be taken directly from the source code of the current function, starting with the function name, e.g., getValue(temp.getPath()).
 * If the current node does not have any interest methods that meet the requirements, do not return `--- function info start ---` or `--- function info end ---`.
 
@@ -780,7 +790,7 @@ def next_hop_agent(target_path: str, call_chain: List[FunctionNode]) -> List[Nex
     Returns:
         List of NextHopResult objects, each containing:
         - expression: The call expression (e.g., "readFile(userInput)")
-        - tag: NodeTag indicating Sink(PathTraversal), Sink(CommandInjection), Sink(CodeInjection), Sink(SQLInjection), or Interest
+        - tag: NodeTag indicating Sink(PathTraversal), Sink(CommandInjection), Sink(CodeInjection), Sink(SQLInjection), Sink(SSRF), or Interest
 
     Example:
         >>> results = next_hop_agent("./project", [source_node, current_node])

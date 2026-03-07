@@ -498,12 +498,22 @@ class TUIManger:
                 label = f"[bold yellow]Sink[/bold yellow] [[yellow]{node.tag.value}[/yellow]]"
             elif node.tag.value == "Sink(SQLInjection)":
                 label = f"[bold blue]Sink[/bold blue] [[blue]{node.tag.value}[/blue]]"
+            elif node.tag.value == "Sink(SSRF)":
+                label = f"[bold cyan]Sink[/bold cyan] [[cyan]{node.tag.value}[/cyan]]"
             else:
                 label = f"[bold red]Sink[/bold red] [[red]{node.tag.value}[/red]]"
         else:
             filename = os.path.basename(node.file_path) if node.file_path else "unknown"
             func_name = node.function_name if node.function_name else "unknown"
             node_key = f"{filename}#{func_name}"
+
+            # Check if this is the currently exploring node (exact match)
+            is_current = (self._current_node_key and node_key == self._current_node_key)
+
+            if is_current:
+                label = f"[black on yellow]<{filename}#{func_name}>[/black on yellow] [[yellow]{node.tag.value}[/yellow]] [bold white]◄ exploring[/bold white]"
+            else:
+                label = f"[cyan]<{filename}#{func_name}>[/cyan] [[yellow]{node.tag.value}[/yellow]]"
 
             # Check if this is the currently exploring node (exact match)
             is_current = (self._current_node_key and node_key == self._current_node_key)
@@ -778,15 +788,16 @@ class TUIManger:
 
     def print_summary(self, path_traversal_count: int = 0, command_injection_count: int = 0,
                       code_injection_count: int = 0, sql_injection_count: int = 0,
+                      ssrf_count: int = 0,
                       total_paths: int = 0) -> None:
         """
         Print a summary of results.
-
         Args:
             path_traversal_count: Number of path traversal vulnerabilities found (explore mode)
             command_injection_count: Number of command injection vulnerabilities found (explore mode)
             code_injection_count: Number of code injection vulnerabilities found (explore mode)
             sql_injection_count: Number of SQL injection vulnerabilities found (explore mode)
+            ssrf_count: Number of SSRF vulnerabilities found (explore mode)
             total_paths: Total number of paths (explore mode)
         """
         # Stop live display
@@ -817,6 +828,7 @@ class TUIManger:
             table.add_row("Command Injection", f"[magenta]{command_injection_count}[/magenta]")
             table.add_row("Code Injection", f"[yellow]{code_injection_count}[/yellow]")
             table.add_row("SQL Injection", f"[blue]{sql_injection_count}[/blue]")
+            table.add_row("SSRF", f"[cyan]{ssrf_count}[/cyan]")
             table.add_row("Nodes Explored", str(self._node_count))
 
             self.console.print(table)
@@ -963,10 +975,11 @@ def clear_current_node() -> None:
 
 def print_summary(path_traversal_count: int, command_injection_count: int,
                   code_injection_count: int, sql_injection_count: int,
+                  ssrf_count: int,
                   total_paths: int) -> None:
     """Print exploration summary."""
     get_tui().print_summary(path_traversal_count, command_injection_count,
-                           code_injection_count, sql_injection_count, total_paths)
+                           code_injection_count, sql_injection_count, ssrf_count, total_paths)
 
 
 # =============================================================================

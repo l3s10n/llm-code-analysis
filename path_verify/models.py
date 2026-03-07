@@ -47,7 +47,7 @@ class PotentialPath:
     This is the input format loaded from path_explore's JSON output.
 
     Attributes:
-        vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, or SQLInjection)
+        vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, SQLInjection, or SSRF)
         sink_expression: The expression where the sink is called
         path: List of PathNode from source to sink (excluding sink marker)
         interface_name: The API interface being analyzed (e.g., /api/readFile)
@@ -97,7 +97,7 @@ class DataflowInfo:
     Represents dataflow information for a single node.
 
     Tracks which parameters and member variables of a function
-    flow to the sink's key semantics (path/command/code/sql).
+    flow to the sink's key semantics (path/command/code/sql/url).
 
     Attributes:
         parameters: List of parameter names that flow to sink semantics
@@ -168,7 +168,7 @@ class NodeDataflowRecord:
     Records the dataflow analysis result for a single node in the path.
 
     This is used to store the result of one_hop_dataflow_agent for each node,
-    tracking which inputs flow to the sink's key semantics.
+    tracking which inputs flow to the sink's key semantics (path/command/code/sql/url).
 
     Attributes:
         node_index: Index of the node in the path (0-based)
