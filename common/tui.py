@@ -9,6 +9,7 @@ Provides a Rich-based TUI with three panels:
 This module uses Rich's Live display for smooth, flicker-free updates.
 """
 
+import hashlib
 import os
 import time
 from typing import Optional, List, Union
@@ -169,17 +170,24 @@ class TUIManger:
             self._node_count = node_count
             self._refresh_immediate()
 
-    def set_current_node(self, file_path: str, function_name: str) -> None:
+    @staticmethod
+    def _build_node_key(file_path: str, function_name: str, source_code: str = "") -> str:
+        """Build a key precise enough to distinguish overloads in the same file."""
+        filename = os.path.basename(file_path) if file_path else "unknown"
+        source_digest = hashlib.sha1(source_code.strip().encode('utf-8')).hexdigest()[:12] if source_code else "nosrc"
+        return f"{filename}#{function_name}#{source_digest}"
+
+    def set_current_node(self, file_path: str, function_name: str, source_code: str = "") -> None:
         """
         Set the currently exploring node for highlighting.
 
         Args:
             file_path: File path of the node being explored
             function_name: Function name of the node being explored
+            source_code: Function source code used to distinguish overloads
         """
         with self.lock:
-            filename = os.path.basename(file_path) if file_path else "unknown"
-            self._current_node_key = f"{filename}#{function_name}"
+            self._current_node_key = self._build_node_key(file_path, function_name, source_code)
             self._refresh_immediate()
 
     def clear_current_node(self) -> None:
@@ -456,9 +464,8 @@ class TUIManger:
         path.append(node)
 
         # Check if this is the current node
-        filename = os.path.basename(node.file_path) if node.file_path else "unknown"
         func_name = node.function_name if node.function_name else "unknown"
-        node_key = f"{filename}#{func_name}"
+        node_key = self._build_node_key(node.file_path, func_name, node.source_code)
 
         if self._current_node_key and node_key == self._current_node_key:
             return True
@@ -470,6 +477,11 @@ class TUIManger:
 
         path.pop()
         return False
+
+    @staticmethod
+    def _path_contains_identity(path: list, target: 'FunctionNode') -> bool:
+        """Check membership by object identity to avoid recursive dataclass equality."""
+        return any(node is target for node in path)
 
     def _build_rich_tree(self, node: 'FunctionNode', parent_tree: Optional[Tree] = None,
                          max_nodes: int = 10, nodes_rendered: Optional[List[int]] = None) -> Tree:
@@ -505,7 +517,7 @@ class TUIManger:
         else:
             filename = os.path.basename(node.file_path) if node.file_path else "unknown"
             func_name = node.function_name if node.function_name else "unknown"
-            node_key = f"{filename}#{func_name}"
+            node_key = self._build_node_key(node.file_path, func_name, node.source_code)
 
             # Check if this is the currently exploring node (exact match)
             is_current = (self._current_node_key and node_key == self._current_node_key)
@@ -539,7 +551,7 @@ class TUIManger:
         # Determine which children to show
         # Always show children if we're on the path to current node
         # Otherwise, respect the max_nodes limit
-        node_in_path = node in current_path
+        node_in_path = self._path_contains_identity(current_path, node)
 
         children_to_show = []
         hidden_children_count = 0
@@ -548,7 +560,7 @@ class TUIManger:
             if nodes_rendered[0] >= max_nodes and not node_in_path:
                 # We've hit the limit and this node is not on the path to current
                 hidden_children_count += 1
-            elif child in current_path:
+            elif self._path_contains_identity(current_path, child):
                 # Child is on the path to current node, always show it
                 children_to_show.append(child)
             elif nodes_rendered[0] < max_nodes:
@@ -963,9 +975,9 @@ def update_stats(node_count: int) -> None:
     get_tui().update_stats(node_count)
 
 
-def set_current_node(file_path: str, function_name: str) -> None:
+def set_current_node(file_path: str, function_name: str, source_code: str = "") -> None:
     """Set the currently exploring node for highlighting."""
-    get_tui().set_current_node(file_path, function_name)
+    get_tui().set_current_node(file_path, function_name, source_code)
 
 
 def clear_current_node() -> None:

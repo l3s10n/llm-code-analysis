@@ -123,6 +123,16 @@ class FunctionExplorer:
 
         return True
 
+    @staticmethod
+    def _node_identity(function_name: str, file_path: str, source_code: str) -> tuple:
+        """
+        Build a stable identity for chain-level cycle detection.
+
+        The source code is included so overloaded methods in the same file are
+        treated as different nodes even when they share the same method name.
+        """
+        return (function_name, file_path, source_code.strip())
+
     def explore_node(self, node: FunctionNode) -> None:
         """
         Explore a single Interest node to find its next hops.
@@ -137,7 +147,7 @@ class FunctionExplorer:
         call_chain = node.get_path_to_root()
 
         # Set current node for highlighting and update tree
-        set_current_node(node.file_path, node.function_name)
+        set_current_node(node.file_path, node.function_name, node.source_code)
         update_tree(self.root)
 
         log_info("Explorer", f"Exploring: {node.function_name}")
@@ -186,18 +196,22 @@ class FunctionExplorer:
             )
 
             if interest_infos:
-                # Build a set of (function_name, file_path) tuples from the call chain
-                # to filter out interests that would create cycles
+                # Build identities for the current call chain only
                 visited_in_chain = set()
                 for chain_node in call_chain:
-                    # Only add non-sink nodes to the visited set
                     if not chain_node.is_sink():
-                        visited_in_chain.add((chain_node.function_name, chain_node.file_path))
+                        visited_in_chain.add(
+                            self._node_identity(
+                                chain_node.function_name,
+                                chain_node.file_path,
+                                chain_node.source_code
+                            )
+                        )
 
                 filtered_count = 0
                 for info in interest_infos:
                     # Check if this interest is already in the call chain
-                    if (info.function_name, info.file_path) in visited_in_chain:
+                    if self._node_identity(info.function_name, info.file_path, info.source_code) in visited_in_chain:
                         log_warning("Explorer", f"Filtered cyclic interest: {info.function_name} in {info.file_path} (already in call chain)")
                         filtered_count += 1
                         continue

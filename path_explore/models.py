@@ -27,7 +27,7 @@ class NodeTag(Enum):
     SINK_SSRF = "Sink(SSRF)"
 
 
-@dataclass
+@dataclass(eq=False)
 class FunctionNode:
     """
     Represents a node in the function exploration tree.
