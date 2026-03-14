@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from common.agent_logger import log_agent_call
 from common.base_claude_agent import AgentResult, base_claude_agent
+from common.config import load_config
 from common.tui import clear_stream, log_error, log_info, log_success, log_warning, stream_agent, update_agent
 
 from .models import DataflowInfo, FilterLogic, NodeDataflowRecord, PathNode, PotentialPath
@@ -209,6 +210,40 @@ Member Variables:
 NonLocalSources:
 {non_local_sources}
 """
+
+
+def _get_final_decision_llm_config() -> tuple[str, str, str]:
+    """
+    Resolve the model configuration used by final_decision_agent.
+
+    Returns:
+        Tuple of (model, base_url, api_key), using decision_llm only when
+        all three values are configured; otherwise falls back to llm.
+    """
+    decision_model = load_config("decision_llm.model")
+    decision_base_url = load_config("decision_llm.base_url")
+    decision_api_key = load_config("decision_llm.api_key")
+
+    decision_model_str = str(decision_model).strip() if decision_model is not None else ""
+    decision_base_url_str = str(decision_base_url).strip() if decision_base_url is not None else ""
+    decision_api_key_str = str(decision_api_key).strip() if decision_api_key is not None else ""
+
+    if (
+        decision_model_str
+        and decision_base_url_str
+        and decision_api_key_str
+    ):
+        return (
+            decision_model_str,
+            decision_base_url_str,
+            decision_api_key_str,
+        )
+
+    return (
+        str(load_config("llm.model")).strip(),
+        str(load_config("llm.base_url")).strip(),
+        str(load_config("llm.api_key")).strip(),
+    )
 
 
 # =============================================================================
@@ -802,9 +837,9 @@ This section documents some typical mistakes you have made in the past. You MUST
 - Mistake: Incorrectly assumed that the second parameter (the `envp` array parameter) of Runtime.exec could not be used to set specific environment variables.
 - Correction: In reality, if the second parameter is controllable, arbitrary environment variables can be set to arbitrary values via entries in the form X=Y.
 
-- Mistake: Incorrectly assumed that filtering `.` or `./` was insufficient because path traversal could still be achieved through inputs like `..` or `../`.
-- Correction: Inputs containing `.` or `./` have already been filtered, so sequences such as `..` or `../` containing `.` or `./` cannot pass through that code path.
-- Generalization: If a string is filtered in a way that cannot be bypassed, then any payload containing that substring is also invalid.
+- Mistake: Incorrectly treated filtering of `.` or `./` as insufficient, on the assumption that traversal inputs such as `..` or `../` could still bypass validation.
+- Correction: That assumption is incorrect in this context. Because `..` and `../` inherently contain blocked substrings, those inputs are also rejected before reaching the relevant code path.
+- Generalization: When validation blocks a substring that is essential to a payload, that payload is also blocked, provided the validation is applied correctly and cannot be bypassed.
 
 These corrections are empirically verified facts. Do NOT waste any time questioning or doubting them—accept them as absolute truth, even if you believe otherwise.
 
@@ -904,10 +939,15 @@ Location: {location}
 
     clear_stream()
 
+    model, base_url, api_key = _get_final_decision_llm_config()
+
     agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_FINAL_DECISION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
         stream_callback=stream_agent,
     )
 

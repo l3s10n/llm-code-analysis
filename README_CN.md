@@ -29,10 +29,17 @@ pip3 install -r requirements.txt
 
 ```
 llm:
-  base_url: "你的base_url"
-  api_key: "你的api_key"
-  model: "你的模型名称"
+  base_url: "普通模型的base_url"
+  api_key: "普通模型的api_key"
+  model: "普通模型的模型名称"
+
+decision_llm:
+  base_url: "复杂决策模型的base_url"
+  api_key: "复杂决策模型的api_key"
+  model: "复杂决策模型名称"
 ```
+
+`decision_llm` 是可选配置，仅用于复杂逻辑决策时调用。如果将其留空，VulSolver 会统一使用 `llm` 配置。
 
 > 由于 VulSolver 目前基于 Claude Code SDK 搭建必要的 agents，请确保你的 `base_url` 支持 Anthropic 的接口格式。
 

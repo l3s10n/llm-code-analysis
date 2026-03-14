@@ -14,6 +14,14 @@ import yaml
 # Global cache for loaded configuration
 _config: Optional[dict] = None
 
+# Keys that are allowed to be missing or empty.
+OPTIONAL_CONFIG_KEYS = {
+    "decision_llm",
+    "decision_llm.base_url",
+    "decision_llm.api_key",
+    "decision_llm.model",
+}
+
 
 def _load_config_file() -> dict:
     """
@@ -63,6 +71,8 @@ def load_config(key: Optional[str] = None) -> Any:
     if key is None:
         return _config
 
+    is_optional_key = key in OPTIONAL_CONFIG_KEYS
+
     # Navigate through nested keys using dot notation
     keys = key.split('.')
     value = _config
@@ -70,6 +80,10 @@ def load_config(key: Optional[str] = None) -> Any:
     for k in keys:
         if isinstance(value, dict) and k in value:
             value = value[k]
+            continue
+
+        if is_optional_key:
+            return None
         else:
             from common.tui import emit_output
 
@@ -79,5 +93,11 @@ def load_config(key: Optional[str] = None) -> Any:
                 level="ERROR",
             )
             sys.exit(1)
+
+    if is_optional_key:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
 
     return value

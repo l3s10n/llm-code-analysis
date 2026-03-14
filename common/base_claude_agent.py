@@ -48,15 +48,36 @@ class AgentResult:
 # Environment Initialization
 # =============================================================================
 
-os.environ["ANTHROPIC_AUTH_TOKEN"] = load_config("llm.api_key")
-os.environ["ANTHROPIC_BASE_URL"] = load_config("llm.base_url")
 os.environ["API_TIMEOUT_MS"] = "3000000"
 os.environ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 os.environ["CLAUDE_CODE_DISABLE_BANNER"] = "1"
 os.environ["NO_BANNER"] = "1"  # Generic banner disable
-os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = load_config("llm.model")
-os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"] = load_config("llm.model")
-os.environ["ANTHROPIC_DEFAULT_OPUS_MODEL"] = load_config("llm.model")
+
+
+def set_model(model: str, base_url: str, api_key: str) -> None:
+    """
+    Set Claude Code runtime environment variables for model routing.
+
+    Args:
+        model: Real model name to map to Claude Code logical model aliases.
+        base_url: Anthropic-compatible base URL for Claude Code SDK calls.
+        api_key: API key used for Claude Code SDK calls.
+    """
+    os.environ["ANTHROPIC_BASE_URL"] = base_url
+    os.environ["ANTHROPIC_AUTH_TOKEN"] = api_key
+    os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+    os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
+    os.environ["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
+
+
+def get_model() -> str:
+    """
+    Get the currently active real model name used for Claude Code mapping.
+
+    Returns:
+        The model name stored in the Opus mapping environment variable.
+    """
+    return os.environ["ANTHROPIC_DEFAULT_OPUS_MODEL"]
 
 
 # =============================================================================
@@ -64,8 +85,12 @@ os.environ["ANTHROPIC_DEFAULT_OPUS_MODEL"] = load_config("llm.model")
 # =============================================================================
 
 DEFAULT_ALLOWED_TOOLS = ['Bash', 'Read', 'Glob', 'Grep']
-DEFAULT_MODEL = 'Opus'
+DEFAULT_MODEL = load_config("llm.model")
+DEFAULT_URL = load_config("llm.base_url")
+DEFAULT_API_KEY = load_config("llm.api_key")
 CACHE_DIR = Path("cache")
+
+set_model(DEFAULT_MODEL, DEFAULT_URL, DEFAULT_API_KEY)
 
 # Global context for error file generation
 # These are set by path_explore/explorer.py and path_verify/verify.py
@@ -172,7 +197,6 @@ def _generate_cache_key(
     system_prompt: str,
     user_prompt: str,
     allowed_tools: List[str],
-    model: str
 ) -> str:
     """
     Generate a unique cache key based on the input parameters.
@@ -182,11 +206,12 @@ def _generate_cache_key(
         system_prompt: System prompt text.
         user_prompt: User prompt text.
         allowed_tools: List of allowed tool names.
-        model: Model name.
 
     Returns:
         A SHA256 hash string used as the cache key.
     """
+    model = get_model()
+
     # Normalize the absolute path of cwd
     abs_cwd = os.path.abspath(cwd)
 
@@ -301,7 +326,7 @@ def _base_claude_agent_impl(
         allowed_tools = DEFAULT_ALLOWED_TOOLS
 
     # Generate cache key and check cache
-    cache_key = _generate_cache_key(cwd, system_prompt, user_prompt, allowed_tools, model)
+    cache_key = _generate_cache_key(cwd, system_prompt, user_prompt, allowed_tools)
 
     if use_cache:
         cached_result = _load_cache(cache_key)
@@ -322,7 +347,7 @@ def _base_claude_agent_impl(
             allowed_tools=allowed_tools,
             permission_mode="bypassPermissions",
             cwd=cwd,
-            model=model,
+            model="Opus",
             include_partial_messages=True,
             stderr=_suppress_stderr  # Suppress stderr output (including banner)
         )
@@ -383,6 +408,8 @@ def base_claude_agent(
     user_prompt: str,
     allowed_tools: Optional[list] = None,
     model: str = DEFAULT_MODEL,
+    base_url: str = DEFAULT_URL,
+    api_key: str = DEFAULT_API_KEY,
     stream_callback: Optional[Callable[[str], None]] = None,
     use_cache: bool = True
 ) -> AgentResult:
@@ -400,7 +427,9 @@ def base_claude_agent(
         user_prompt: User prompt containing the task to execute.
         allowed_tools: List of tools that the agent is allowed to use.
                       Defaults to ['Bash', 'Read', 'Glob', 'Grep'].
-        model: Model to use for the agent. Defaults to 'Opus'.
+        model: Real model name mapped onto Claude Code's Opus alias.
+        base_url: Anthropic-compatible base URL used for the request.
+        api_key: API key used for the request.
         stream_callback: Optional callback function for streaming output.
                         Called with each text chunk as it arrives.
         use_cache: Whether to use caching. Defaults to True.
@@ -409,6 +438,8 @@ def base_claude_agent(
         AgentResult: Contains result string (or None if failed), success status,
                     and error information if failed.
     """
+
+    set_model(model, base_url, api_key)
 
     # Load retry configuration
     try:
@@ -527,7 +558,7 @@ def _execute_with_timeout(
         allowed_tools = DEFAULT_ALLOWED_TOOLS
 
     # Generate cache key and check cache first
-    cache_key = _generate_cache_key(cwd, system_prompt, user_prompt, allowed_tools, model)
+    cache_key = _generate_cache_key(cwd, system_prompt, user_prompt, allowed_tools)
 
     if use_cache:
         cached_result = _load_cache(cache_key)
@@ -549,7 +580,7 @@ def _execute_with_timeout(
                 allowed_tools=allowed_tools,
                 permission_mode="bypassPermissions",
                 cwd=cwd,
-                model=model,
+                    model="Opus",
                 include_partial_messages=True,
                 stderr=_suppress_stderr
             )

@@ -1,8 +1,13 @@
-# GOLD MINER Configuration File
+# VulSolver Configuration File
 # ================================
 
 # LLM Configuration
 llm:
+  base_url: ""
+  api_key: ""
+  model: ""
+
+decision_llm:
   base_url: ""
   api_key: ""
   model: ""

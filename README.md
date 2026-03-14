@@ -29,10 +29,17 @@ Then configure the model settings in `config.yaml`:
 
 ```
 llm:
-  base_url: "your_base_url"
-  api_key: "your_api_key"
-  model: "your_model_name"
+  base_url: "base_url_for_the_default_model"
+  api_key: "api_key_for_the_default_model"
+  model: "model_name_for_the_default_model"
+
+decision_llm:
+  base_url: "base_url_for_the_complex_decision_model"
+  api_key: "api_key_for_the_complex_decision_model"
+  model: "model_name_for_the_complex_decision_model"
 ```
+
+`decision_llm` is optional and is only used for complex logic decisions. If it is left empty, VulSolver will use the `llm` configuration everywhere.
 
 > Since VulSolver is currently built on the Claude Code SDK for agent orchestration, please ensure your `base_url` supports the Anthropic API format.
 
