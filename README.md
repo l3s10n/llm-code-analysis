@@ -40,22 +40,41 @@ llm:
 
 VulSolver performs in-depth code analysis at the interface level (HTTP endpoints, RPC entry points, etc.). You can analyze a project's interface with the following command:
 
-```python
+```bash
 python3 main.py <target_project_root_directory> <target_interface_name> # Example: python3 main.py '/tmp/helloProject' '/sample/hello'
+```
+
+To analyze multiple interfaces in one run, provide an interface list file with one interface per line:
+
+```bash
+python3 main.py <target_project_root_directory> --interface-file <interface_file>
+```
+
+For example:
+
+```bash
+python3 main.py '/tmp/helloProject' --interface-file './interfaces.txt'
+```
+
+If you prefer plain terminal output instead of the Textual TUI, add `--no-tui`:
+
+```bash
+python3 main.py <target_project_root_directory> <target_interface_name> --no-tui
+```
+
+You can also combine `--interface-file` and `--no-tui`:
+
+```bash
+python3 main.py <target_project_root_directory> --interface-file <interface_file> --no-tui
 ```
 
 **Note:** Avoid using `sudo` or running as the root user.
 
-During execution, VulSolver displays the analysis process in real-time via a TUI interface:
+During execution, VulSolver displays the analysis process in real-time via a TUI interface by default:
 
-<table>
-  <tr>
-    <td><img src="assets/path_explore_sample.png" alt="path_explore"></td>
-    <td><img src="assets/path_verify_sample.png" alt="path_verify"></td>
-  </tr>
-</table>
+![VulSolver example](assets/example.jpg)
 
-Upon completion, VulSolver will display a summary in the terminal.
+If `--no-tui` is specified, VulSolver prints progress and summary directly to the terminal.
 
 # Viewing Results
 

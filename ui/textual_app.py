@@ -5,6 +5,7 @@ Textual application for VulSolver.
 from __future__ import annotations
 
 import json
+import errno
 import os
 import textwrap
 from dataclasses import dataclass, field
@@ -70,11 +71,14 @@ class VulSolverTextualApp(App):
     CSS_PATH = "vulsolver.tcss"
     TITLE = "VulSolver"
     SUB_TITLE = "Analysis Console"
+    _MAX_MISSING_STATE_POLLS = 10
 
-    def __init__(self, state_file: str) -> None:
+    def __init__(self, state_file: str, parent_pid: int | None = None) -> None:
         super().__init__()
         self.state_file = Path(state_file)
+        self.parent_pid = parent_pid or 0
         self._last_snapshot: UISnapshot | None = None
+        self._missing_state_polls = 0
 
     def compose(self) -> ComposeResult:
         yield Static(id="window-bar")
@@ -104,9 +108,18 @@ class VulSolverTextualApp(App):
         self.set_interval(0.1, self.refresh_from_state)
 
     def refresh_from_state(self) -> None:
+        if not self._is_parent_alive():
+            self.exit()
+            return
+
         snapshot = self._load_snapshot()
         if snapshot is None:
+            self._missing_state_polls += 1
+            if self._missing_state_polls >= self._MAX_MISSING_STATE_POLLS:
+                self.exit()
             return
+
+        self._missing_state_polls = 0
         if snapshot.should_exit:
             self.exit()
             return
@@ -139,6 +152,18 @@ class VulSolverTextualApp(App):
             return None
         except json.JSONDecodeError:
             return self._last_snapshot
+
+    def _is_parent_alive(self) -> bool:
+        if self.parent_pid <= 0:
+            return True
+
+        try:
+            os.kill(self.parent_pid, 0)
+        except OSError as exc:
+            if exc.errno == errno.ESRCH:
+                return False
+            return True
+        return True
 
     @staticmethod
     def _render_window_bar(snapshot: UISnapshot) -> str:

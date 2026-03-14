@@ -4,6 +4,8 @@ Process-based controller for the Textual frontend.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import termios
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -81,6 +84,9 @@ class TextualFrontendController:
         self._is_running = False
         self._stop_requested = False
         self._unexpected_shutdown = False
+        self._tty_fd: Optional[int] = None
+        self._saved_termios: Optional[list] = None
+        self._saved_fl: Optional[int] = None
 
     @property
     def is_running(self) -> bool:
@@ -120,6 +126,7 @@ class TextualFrontendController:
             self._root = None
             self._stop_requested = False
             self._unexpected_shutdown = False
+            self._capture_terminal_state_locked()
             state_dir = Path("cache") / "ui"
             state_dir.mkdir(parents=True, exist_ok=True)
             state_name = f"state-{os.getpid()}-{int(time.time() * 1000)}.json"
@@ -160,6 +167,7 @@ class TextualFrontendController:
             self._state.should_exit = False
             self._stop_requested = False
             self._unexpected_shutdown = False
+            self._restore_terminal_state_locked()
 
         if state_file is not None:
             state_file.unlink(missing_ok=True)
@@ -327,6 +335,56 @@ class TextualFrontendController:
         with open(temp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         os.replace(temp_path, self._state_file)
+
+    def _capture_terminal_state_locked(self) -> None:
+        self._restore_terminal_state_locked()
+
+        fd: Optional[int] = None
+        if sys.stdin.isatty():
+            fd = sys.stdin.fileno()
+        else:
+            with contextlib.suppress(OSError):
+                fd = os.open("/dev/tty", os.O_RDWR)
+
+        if fd is None:
+            return
+
+        try:
+            self._saved_termios = termios.tcgetattr(fd)
+            self._saved_fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            self._tty_fd = fd
+        except OSError:
+            if fd != sys.stdin.fileno():
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+            self._tty_fd = None
+            self._saved_termios = None
+            self._saved_fl = None
+
+    def _restore_terminal_state_locked(self) -> None:
+        fd = self._tty_fd
+        saved_termios = self._saved_termios
+        saved_fl = self._saved_fl
+
+        self._tty_fd = None
+        self._saved_termios = None
+        self._saved_fl = None
+
+        if fd is None:
+            return
+
+        try:
+            if saved_termios is not None:
+                termios.tcsetattr(fd, termios.TCSADRAIN, saved_termios)
+            if saved_fl is not None:
+                fcntl.fcntl(fd, fcntl.F_SETFL, saved_fl)
+            os.write(fd, b"\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1bc")
+        except OSError:
+            pass
+        finally:
+            if fd != sys.stdin.fileno():
+                with contextlib.suppress(OSError):
+                    os.close(fd)
 
     @staticmethod
     def _build_node_key(file_path: str, function_name: str, source_code: str = "") -> str:

@@ -40,22 +40,41 @@ llm:
 
 VulSolver 以接口（HTTP 接口、RPC 接口等入口）为维度深入分析代码，通过以下简单的命令即可对项目的接口做深入分析：
 
-```python
+```bash
 python3 main.py <待分析项目根目录> <待分析项目接口名> # 例如：python3 main.py '/tmp/helloProject' '/sample/hello'
+```
+
+如果你希望一次分析多个接口，可以通过 `--interface-file` 提供一个接口列表文件，文件中每行一个接口：
+
+```bash
+python3 main.py <待分析项目根目录> --interface-file <接口列表文件>
+```
+
+例如：
+
+```bash
+python3 main.py '/tmp/helloProject' --interface-file './interfaces.txt'
+```
+
+如果你希望禁用 Textual TUI、直接在终端输出分析进度，可以添加 `--no-tui`：
+
+```bash
+python3 main.py <待分析项目根目录> <待分析项目接口名> --no-tui
+```
+
+你也可以将 `--interface-file` 和 `--no-tui` 组合使用：
+
+```bash
+python3 main.py <待分析项目根目录> --interface-file <接口列表文件> --no-tui
 ```
 
 **注意：** 请勿使用 `sudo` 或以 root 用户身份运行。
 
-执行过程中 VulSolver 会以 TUI 的形式实时展示模型分析过程：
+执行过程中，VulSolver 默认会以 TUI 的形式实时展示模型分析过程：
 
-<table>
-  <tr>
-    <td><img src="assets/path_explore_sample.png" alt="path_explore"></td>
-    <td><img src="assets/path_verify_sample.png" alt="path_verify"></td>
-  </tr>
-</table>
+![VulSolver 示例](assets/example.jpg)
 
-执行结束后，VulSolver 会在终端展示必要的总结信息。
+如果指定了 `--no-tui`，VulSolver 会直接在终端输出分析进度和总结信息。
 
 # 结果详情查阅
 
