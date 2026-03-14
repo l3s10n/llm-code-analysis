@@ -127,6 +127,7 @@ class VulSolverTextualApp(App):
         self.query_one("#stream-content", Static).update(stream.text)
         self.query_one("#status-line", Static).update(self._render_status_line(snapshot))
         self.query_one("#summary-line", Static).update(self._render_summary_line(snapshot))
+        self._sync_scroll_positions(snapshot)
 
     def _load_snapshot(self) -> UISnapshot | None:
         try:
@@ -154,7 +155,7 @@ class VulSolverTextualApp(App):
             return f"  {panel.title}   {panel.subtitle}  "
         return f"  {panel.title}  "
 
-    def _render_focus(self, snapshot: UISnapshot) -> FocusView:
+    def _focus_lines(self, snapshot: UISnapshot) -> List[str]:
         raw = snapshot.tree_text if snapshot.mode == "explore" else snapshot.call_chain_text
         default = "Waiting for exploration to start..." if snapshot.mode == "explore" else "Waiting for verification to start..."
         lines = raw.splitlines() if raw.strip() else [default]
@@ -168,14 +169,19 @@ class VulSolverTextualApp(App):
                 and not line.startswith("Vulnerable:")
             ]
 
-        anchor = self._find_anchor(lines)
-        height = self._content_height("#focus-scroll", fallback=18)
+        return lines
+
+    def _render_focus(self, snapshot: UISnapshot) -> FocusView:
+        lines = self._focus_lines(snapshot)
+
         width = self._content_width("#focus-scroll", fallback=72)
-        text = self._window_text(lines, anchor, height, width)
+        wrapped_lines = self._soft_wrap_lines(lines, width)
+        text = "\n".join(wrapped_lines)
         active_line = self._build_active_line(snapshot)
 
         if active_line:
-            text = f"{active_line}\n\n{text}"
+            active_wrapped = "\n".join(self._soft_wrap_lines([active_line], width))
+            text = f"{active_wrapped}\n\n{text}"
 
         total = len(lines)
         subtitle = f"{total} lines"
@@ -185,10 +191,7 @@ class VulSolverTextualApp(App):
                 f"{snapshot.target_endpoint or '-'}   {total} lines"
                 f"   {snapshot.explore_nodes} nodes"
             )
-            if len(text.splitlines()) < total:
-                subtitle += "   active branch"
-            else:
-                subtitle += "   full context"
+            subtitle += "   full context"
         else:
             stage = (snapshot.verify_stage or "-").replace("_", " ").upper()
             title = "Call Chain"
@@ -197,24 +200,63 @@ class VulSolverTextualApp(App):
                 f"   {stage}"
                 f"   {total} lines"
             )
-            if len(text.splitlines()) < total:
-                subtitle += "   active branch"
-            else:
-                subtitle += "   full context"
+            subtitle += "   full context"
 
         return FocusView(title=title, subtitle=subtitle, text=text)
+
+    def _sync_scroll_positions(self, snapshot: UISnapshot) -> None:
+        try:
+            self.query_one("#log-scroll", VerticalScroll).scroll_end(
+                animate=False,
+                immediate=True,
+                x_axis=False,
+            )
+        except Exception:
+            pass
+
+        try:
+            self.query_one("#stream-scroll", VerticalScroll).scroll_end(
+                animate=False,
+                immediate=True,
+                x_axis=False,
+            )
+        except Exception:
+            pass
+
+        try:
+            focus_scroll = self.query_one("#focus-scroll", VerticalScroll)
+            focus_scroll.scroll_to(
+                y=self._focus_scroll_target(snapshot),
+                animate=False,
+                immediate=True,
+                force=True,
+            )
+        except Exception:
+            pass
+
+    def _focus_scroll_target(self, snapshot: UISnapshot) -> int:
+        lines = self._focus_lines(snapshot)
+        anchor = self._find_anchor(lines)
+        width = self._content_width("#focus-scroll", fallback=72)
+        height = self._content_height("#focus-scroll", fallback=18)
+
+        wrapped_before_anchor = len(self._soft_wrap_lines(lines[:anchor], width))
+        active_line = self._build_active_line(snapshot)
+        prefix_lines = 0
+        if active_line:
+            prefix_lines = len(self._soft_wrap_lines([active_line], width)) + 2
+
+        context_lines = max(0, height // 3)
+        return max(0, prefix_lines + wrapped_before_anchor - context_lines)
 
     def _render_logs(self, snapshot: UISnapshot) -> PanelView:
         if not snapshot.logs:
             return PanelView(title="Logs", subtitle="waiting for events", text="No events yet.")
 
-        height = self._content_height("#log-scroll", fallback=10)
         width = self._content_width("#log-scroll", fallback=72)
         wrapped = self._soft_wrap_lines(snapshot.logs, width)
-        text = self._tail_text(wrapped, height, width, clip=False)
+        text = "\n".join(wrapped)
         subtitle = f"{len(snapshot.logs)} events"
-        if len(wrapped) > len(text.splitlines()):
-            subtitle += f"   latest {len(text.splitlines())}"
         return PanelView(title="Logs", subtitle=subtitle, text=text)
 
     def _render_agent(self, snapshot: UISnapshot) -> PanelView:
@@ -232,13 +274,10 @@ class VulSolverTextualApp(App):
             chunks.append("Waiting for model output...")
 
         raw_lines = "\n".join(chunks).splitlines() or ["Waiting for model output..."]
-        height = self._content_height("#stream-scroll", fallback=24)
         width = self._content_width("#stream-scroll", fallback=44)
         wrapped = self._soft_wrap_lines(raw_lines, width)
-        text = self._tail_text(wrapped, height, width, clip=False)
+        text = "\n".join(wrapped)
         subtitle = snapshot.agent_name or "System"
-        if len(wrapped) > len(text.splitlines()):
-            subtitle += f"   latest {len(text.splitlines())} wrapped lines"
         title = "Agent Output"
         return PanelView(title=title, subtitle=subtitle, text=text)
 
@@ -288,37 +327,6 @@ class VulSolverTextualApp(App):
             file_part = f" ({short_file})" if short_file else ""
             return f"Analyzing now: [{snapshot.current_analyzing_index}] {func_name}{file_part}"
         return "Analyzing now: Sink"
-
-    def _window_text(self, lines: List[str], anchor: int, height: int, width: int) -> str:
-        if not lines:
-            return ""
-
-        height = max(6, height - 2)
-        if len(lines) <= height:
-            return "\n".join(self._clip_lines(lines, width))
-
-        start = max(0, anchor - height // 2)
-        end = min(len(lines), start + height)
-        start = max(0, end - height)
-
-        excerpt: List[str] = []
-        if start > 0:
-            excerpt.append(f"... {start} lines above ...")
-        excerpt.extend(lines[start:end])
-        if end < len(lines):
-            excerpt.append(f"... {len(lines) - end} lines below ...")
-        return "\n".join(self._clip_lines(excerpt, width))
-
-    def _tail_text(self, lines: List[str], height: int, width: int, clip: bool = True) -> str:
-        if not lines:
-            return ""
-        height = max(4, height - 2)
-        excerpt = lines[-height:]
-        if len(lines) > height:
-            excerpt = [f"... {len(lines) - height} earlier lines ..."] + excerpt[1:]
-        if clip:
-            excerpt = self._clip_lines(excerpt, width)
-        return "\n".join(excerpt)
 
     @staticmethod
     def _soft_wrap_lines(lines: List[str], width: int) -> List[str]:

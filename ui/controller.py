@@ -383,6 +383,8 @@ class TextualFrontendController:
                 line += f"  ({short_file})"
             lines.append(line)
         if self._state.sink_expression:
+            lines.append(f"- Sink  ::  {self._state.sink_expression}")
+        else:
             lines.append("- Sink")
         lines.append("")
         lines.append(f"Vulnerable: {self._state.vulnerable_count} | Not Vulnerable: {self._state.not_vulnerable_count}")

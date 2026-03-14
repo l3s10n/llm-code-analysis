@@ -19,6 +19,7 @@ class NodeTag(Enum):
     SINK_SQL_INJECTION: Node represents a SQL injection vulnerability sink
     SINK_SSRF: Node represents a Server-Side Request Forgery vulnerability sink
     """
+
     INTEREST = "Interest"
     SINK_PATH_TRAVERSAL = "Sink(PathTraversal)"
     SINK_COMMAND_INJECTION = "Sink(CommandInjection)"
@@ -38,23 +39,28 @@ class FunctionNode:
         source_code: Source code of the function
         tag: Classification tag (Interest, Sink, etc.)
         extra_info: Additional information (e.g., call expression for sinks)
+        start_line: Start line of the function in the source file (1-based, inclusive)
+        end_line: End line of the function in the source file (1-based, inclusive)
         children: List of child nodes
         parent: Reference to parent node (None for root)
     """
+
     function_name: str = ""
     file_path: str = ""
     source_code: str = ""
     tag: NodeTag = NodeTag.INTEREST
     extra_info: str = ""
-    children: List['FunctionNode'] = field(default_factory=list)
-    parent: Optional['FunctionNode'] = None
+    start_line: int = 0
+    end_line: int = 0
+    children: List["FunctionNode"] = field(default_factory=list)
+    parent: Optional["FunctionNode"] = None
 
-    def add_child(self, child: 'FunctionNode') -> None:
+    def add_child(self, child: "FunctionNode") -> None:
         """Add a child node and set parent reference."""
         child.parent = self
         self.children.append(child)
 
-    def remove_child(self, child: 'FunctionNode') -> None:
+    def remove_child(self, child: "FunctionNode") -> None:
         """Remove a child node."""
         if child in self.children:
             self.children.remove(child)
@@ -71,10 +77,10 @@ class FunctionNode:
             NodeTag.SINK_COMMAND_INJECTION,
             NodeTag.SINK_CODE_INJECTION,
             NodeTag.SINK_SQL_INJECTION,
-            NodeTag.SINK_SSRF
+            NodeTag.SINK_SSRF,
         )
 
-    def get_path_to_root(self) -> List['FunctionNode']:
+    def get_path_to_root(self) -> List["FunctionNode"]:
         """Get the path from this node to the root."""
         path = [self]
         current = self.parent
@@ -96,70 +102,53 @@ class FunctionNode:
         """
         import os
 
-        # Build prefix for tree visualization
         prefix = "    " * indent
         if indent > 0:
             prefix += "└── " if is_last else "├── "
 
-        # Build node display string
         if self.is_sink():
             node_display = "Sink"
         else:
-            # Get filename without path
             filename = os.path.basename(self.file_path) if self.file_path else "?"
             node_display = f"{filename}#{self.function_name}"
 
         result = f"{prefix}{node_display}\n"
 
-        # Recursively add children
         for i, child in enumerate(self.children):
-            is_last_child = (i == len(self.children) - 1)
+            is_last_child = i == len(self.children) - 1
             result += child.to_tree_string(indent + 1, is_last_child)
 
         return result
 
 
 @dataclass
-class NextHopResult:
+class InterestInfo:
     """
-    Result from next_hop_agent containing information about next hop functions.
-
-    Attributes:
-        expression: The call expression of the next hop function
-        tag: Classification of the next hop (Sink or Interest)
-    """
-    expression: str
-    tag: NodeTag
-
-
-@dataclass
-class NextHopInfo:
-    """
-    Detailed information about a next hop function from interest_info_find_agent.
+    Information about an interest function.
 
     Attributes:
         function_name: Name of the function
         file_path: Path to the file containing the function
-        source_code: Source code of the function
+        start_line: Start line of the function in the source file (1-based, inclusive)
+        end_line: End line of the function in the source file (1-based, inclusive)
     """
+
     function_name: str
     file_path: str
-    source_code: str
+    start_line: int
+    end_line: int
 
 
 @dataclass
-class SourceInfo:
+class SinkInfo:
     """
-    Information about the source function from source_info_find_agent.
+    Information about a sink node.
 
     Attributes:
-        function_name: Name of the source function
-        file_path: Path to the file containing the function
-        source_code: Source code of the function
+        sink_expression: The sink call expression in the current function
     """
-    function_name: str
-    file_path: str
-    source_code: str
+
+    sink_expression: str
 
 
 @dataclass
@@ -173,9 +162,10 @@ class VulnerabilityPath:
         path: List of (file_path, function_name, source_code) tuples from source to sink
         interface_name: The API interface being analyzed (e.g., /api/readFile)
     """
+
     vulnerability_type: str
     sink_expression: str
-    path: List[tuple]  # List of (file_path, function_name, source_code)
+    path: List[tuple]
     interface_name: str = ""
 
     def to_dict(self) -> dict:
@@ -184,5 +174,5 @@ class VulnerabilityPath:
             "InterfaceName": self.interface_name,
             "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
-            "Path": [{"file": p[0], "name": p[1], "source_code": p[2]} for p in self.path]
+            "Path": [{"file": p[0], "name": p[1], "source_code": p[2]} for p in self.path],
         }
