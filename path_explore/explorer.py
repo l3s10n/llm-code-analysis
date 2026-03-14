@@ -482,7 +482,14 @@ Summary:
             path_data = []
             for node in path:
                 if not node.is_sink():
-                    path_data.append((node.file_path, node.function_name, node.source_code))
+                    path_data.append(
+                        (
+                            node.file_path,
+                            node.function_name,
+                            node.start_line,
+                            node.end_line,
+                        )
+                    )
 
             vuln_path = VulnerabilityPath(
                 vulnerability_type=vuln_type,

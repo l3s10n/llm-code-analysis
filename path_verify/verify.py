@@ -38,7 +38,7 @@ from .models import (
     VerificationResult
 )
 from .agents import (
-    one_hop_dataflow_agent,
+    dataflow_agent,
     one_hop_filter_agent,
     final_decision_agent
 )
@@ -157,8 +157,8 @@ class PathVerifier:
         )
 
         # Update TUI with current path info
-        call_chain_names = [node.name for node in path.path]
-        call_chain_files = [node.file for node in path.path]
+        call_chain_names = [node.function_name for node in path.path]
+        call_chain_files = [node.file_path for node in path.path]
         set_verify_path_info(
             path_index,
             total_paths,
@@ -181,35 +181,13 @@ class PathVerifier:
         set_verify_stage("dataflow")
         log_info("Verifier", "Phase 1: Dataflow Analysis (Sink -> Source)")
 
-        dataflow_records: List[NodeDataflowRecord] = []
-        next_node_dataflow: Optional[DataflowInfo] = None
-
-        # Analyze from last node to first (sink to source)
-        for i in range(len(path.path) - 1, -1, -1):
-            node = path.path[i]
-
-            # Update TUI to show which node is being analyzed
-            set_analyzing_node(i)
-            log_info("Verifier", f"Analyzing dataflow in node [{i}]: {node.name}")
-
-            # Analyze dataflow for this node
-            dataflow_info = one_hop_dataflow_agent(
-                target_path=self.target_path,
-                path=path,
-                node_index=i,
-                next_node_dataflow=next_node_dataflow
-            )
-
-            # Record the dataflow info
-            record = NodeDataflowRecord(
-                node_index=i,
-                node_name=node.name,
-                dataflow_info=dataflow_info
-            )
-            dataflow_records.insert(0, record)  # Insert at beginning to maintain order
-
-            # Update for next iteration
-            next_node_dataflow = dataflow_info
+        if path.path:
+            set_analyzing_node(len(path.path) - 1)
+        dataflow_records = dataflow_agent(
+            target_path=self.target_path,
+            path=path,
+        )
+        dataflow_records = self._normalize_dataflow_records(path, dataflow_records)
 
         # Clear node highlighting after dataflow phase
         set_analyzing_node(-1)
@@ -230,21 +208,17 @@ class PathVerifier:
 
             # Update TUI to show which node is being analyzed
             set_analyzing_node(i)
-            log_info("Verifier", f"Analyzing filters in node [{i}]: {node.name}")
+            log_info("Verifier", f"Analyzing filters in node [{i}]: {node.function_name}")
 
-            # Get dataflow info for this node and next node
+            # Get dataflow info for this node
             x_dataflow = dataflow_records[i].dataflow_info
-            y_dataflow = None
-            if i + 1 < len(dataflow_records):
-                y_dataflow = dataflow_records[i + 1].dataflow_info
 
-            # Analyze filters
+            # Analyze caller-side filtering logic before the next hop
             filter_logics = one_hop_filter_agent(
                 target_path=self.target_path,
                 path=path,
                 node_index=i,
                 current_dataflow=x_dataflow,
-                next_dataflow=y_dataflow
             )
 
             all_filter_logics.extend(filter_logics)
@@ -296,13 +270,13 @@ class PathVerifier:
         import os
 
         # Build call chain with arrow
-        call_chain = " → ".join([node.name for node in path.path] + ["sink"])
+        call_chain = " → ".join([node.function_name for node in path.path] + ["sink"])
 
         # Build path nodes info
         nodes_info = []
         for j, node in enumerate(path.path):
-            short_file = os.path.basename(node.file) if node.file else "?"
-            nodes_info.append(f"  [{j}] {node.name}")
+            short_file = os.path.basename(node.file_path) if node.file_path else "?"
+            nodes_info.append(f"  [{j}] {node.function_name}")
             nodes_info.append(f"      File: {short_file}")
 
         content = f"""
@@ -323,6 +297,37 @@ Path Nodes:
 
 """
         return content
+
+    @staticmethod
+    def _normalize_dataflow_records(
+        path: PotentialPath,
+        records: List[NodeDataflowRecord],
+    ) -> List[NodeDataflowRecord]:
+        """
+        Normalize dataflow records to ensure every node has one entry.
+
+        Args:
+            path: PotentialPath being verified
+            records: Parsed records returned by dataflow_agent
+
+        Returns:
+            List of NodeDataflowRecord aligned with path order
+        """
+
+        record_map = {record.node_index: record for record in records}
+        normalized_records = []
+
+        for i, node in enumerate(path.path):
+            record = record_map.get(i)
+            if record is None:
+                record = NodeDataflowRecord(
+                    node_index=i,
+                    node_name=node.function_name,
+                    dataflow_info=DataflowInfo(),
+                )
+            normalized_records.append(record)
+
+        return normalized_records
 
     def _format_path_result(self, result: VerificationResult, path_index: int) -> str:
         """

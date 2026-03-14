@@ -159,7 +159,7 @@ class VulnerabilityPath:
     Attributes:
         vulnerability_type: Type of vulnerability (PathTraversal, CommandInjection, CodeInjection, SQLInjection, or SSRF)
         sink_expression: The expression where the sink is called
-        path: List of (file_path, function_name, source_code) tuples from source to sink
+        path: List of (file_path, function_name, start_line, end_line) tuples from source to sink
         interface_name: The API interface being analyzed (e.g., /api/readFile)
     """
 
@@ -174,5 +174,13 @@ class VulnerabilityPath:
             "InterfaceName": self.interface_name,
             "Type": self.vulnerability_type,
             "SinkExpression": self.sink_expression,
-            "Path": [{"file": p[0], "name": p[1], "source_code": p[2]} for p in self.path],
+            "Path": [
+                {
+                    "file_path": p[0],
+                    "function_name": p[1],
+                    "start_line": p[2],
+                    "end_line": p[3],
+                }
+                for p in self.path
+            ],
         }

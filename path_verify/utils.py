@@ -18,6 +18,21 @@ from .models import (
 )
 
 
+def read_source_code_by_range(target_path: str, node: PathNode) -> str:
+    """
+    Read source code for a PathNode.
+
+    Args:
+        target_path: Path to the target project's source code
+        node: PathNode describing the function location
+
+    Returns:
+        Source code string for the function
+    """
+
+    return node.get_source_code(target_path)
+
+
 def load_potential_paths(json_path: str) -> List[PotentialPath]:
     """
     Load potential vulnerability paths from a JSON file.
@@ -75,7 +90,7 @@ def print_call_chain(path: PotentialPath, highlight_index: Optional[int] = None)
     emit_output("Call Chain:", source="Verifier")
     for i, node in enumerate(path.path):
         prefix = ">>> " if i == highlight_index else "    "
-        emit_output(f"  {prefix}[{i}] {node.name} ({node.file})", source="Verifier")
+        emit_output(f"  {prefix}[{i}] {node.function_name} ({node.file_path})", source="Verifier")
     emit_output(f"      -> sink: {path.sink_expression}", source="Verifier")
 
 
@@ -96,6 +111,11 @@ def print_dataflow_analysis(records: List[NodeDataflowRecord]) -> None:
             emit_output(f"    Parameters: {', '.join(info.parameters)}", source="Verifier")
         if info.member_variables:
             emit_output(f"    Member Variables: {', '.join(info.member_variables)}", source="Verifier")
+        if info.non_local_sources:
+            emit_output(
+                f"    NonLocalSources: {'; '.join(info.non_local_sources)}",
+                source="Verifier",
+            )
         if info.is_empty():
             emit_output("    (No dataflow to sink)", source="Verifier")
 
@@ -116,7 +136,7 @@ def print_filter_analysis(logics: List[FilterLogic]) -> None:
 
     for i, logic in enumerate(logics, 1):
         emit_output(f"  Filter #{i}:", source="Verifier")
-        emit_output(f"    Dataflow: {logic.dataflow}", source="Verifier")
+        emit_output(f"    Affected Item: {logic.dataflow}", source="Verifier")
         emit_output(f"    Description: {logic.description}", source="Verifier")
         location = logic.file_path
         if logic.line_range:
@@ -153,7 +173,14 @@ def print_final_result(result: VerificationResult) -> None:
             df = record.dataflow_info
             params = ", ".join(df.parameters) if df.parameters else "None"
             members = ", ".join(df.member_variables) if df.member_variables else "None"
-            emit_output(f"    [{record.node_name}]: params={params}, members={members}", source="Verifier")
+            non_local_sources = "; ".join(df.non_local_sources) if df.non_local_sources else "None"
+            emit_output(
+                (
+                    f"    [{record.node_name}]: params={params}, members={members}, "
+                    f"non_local_sources={non_local_sources}"
+                ),
+                source="Verifier",
+            )
 
     # Filters summary
     if result.filter_logics:
@@ -206,7 +233,7 @@ def print_verification_summary(results: List[VerificationResult]) -> None:
         for r in results:
             if r.is_vulnerable:
                 # Build call chain display from path
-                names = [node.name for node in r.path]
+                names = [node.function_name for node in r.path]
                 names.append("sink")
                 call_chain = " -> ".join(names)
                 emit_output(f"    - {call_chain} ({r.vulnerability_type})", source="Verifier")
@@ -237,5 +264,5 @@ def format_node_for_display(node: PathNode, index: int) -> str:
     Returns:
         Formatted string like "[0] functionName (filename.java)"
     """
-    short_file = get_short_filename(node.file)
-    return f"[{index}] {node.name} ({short_file})"
+    short_file = get_short_filename(node.file_path)
+    return f"[{index}] {node.function_name} ({short_file})"

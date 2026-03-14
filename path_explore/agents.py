@@ -505,7 +505,7 @@ There may be zero, one, or multiple valid sink nodes and interest nodes.
 A sink node must satisfy all of the following:
 
 1. It is a direct next-hop call made by the current function.
-2. It is NOT implemented in the current project.
+2. **It is NOT implemented in the current project.** (IMPORTANT)
 3. It directly performs one of the following categories of operation:
    - file path based file operation, only care about file creation, deletion, reading, and writing operations
    - command execution
@@ -520,7 +520,7 @@ A sink node must satisfy all of the following:
 An interest node must satisfy all of the following:
 
 1. It is a direct next-hop call made by the current function.
-2. It has a concrete implementation inside the current project.
+2. **It has a concrete implementation inside the current project.** (IMPORTANT)
 3. Its implementation is a meaningful next exploration target for sink discovery: it may directly or indirectly reach sink functions.
 4. Apply the following filtering rules:
   a) Be selective: return only high-value direct callees for further sink discovery, and avoid low-signal or marginal candidates.

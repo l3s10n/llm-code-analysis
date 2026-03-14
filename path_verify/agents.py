@@ -9,17 +9,12 @@ import re
 import sys
 from typing import List, Optional
 
-from common.base_claude_agent import base_claude_agent, AgentResult
-from common.tui import log_info, log_success, log_error, update_agent, stream_agent, clear_stream
 from common.agent_logger import log_agent_call
+from common.base_claude_agent import AgentResult, base_claude_agent
+from common.tui import clear_stream, log_error, log_info, log_success, log_warning, stream_agent, update_agent
 
-from .models import (
-    PathNode,
-    PotentialPath,
-    DataflowInfo,
-    FilterLogic,
-    NodeDataflowRecord
-)
+from .models import DataflowInfo, FilterLogic, NodeDataflowRecord, PathNode, PotentialPath
+from .utils import read_source_code_by_range
 
 
 # =============================================================================
@@ -37,22 +32,25 @@ def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
         agent_result: The failed AgentResult containing error details
         agent_name: Name of the agent that failed (for logging)
     """
-    from common.tui import emit_output, stop_tui
     from common.agent_logger import close_logger
     from common.base_claude_agent import create_error_file
+    from common.tui import emit_output, stop_tui
 
-    # Stop TUI if running
     stop_tui()
     close_logger()
 
-    # Create error file
     error_file_path = create_error_file(agent_name, agent_result)
 
-    # Print error message
-    emit_output(f"[Error] Agent '{agent_name}' failed: {agent_result.error_message}", source=agent_name, level="ERROR")
-    emit_output(f"[Error] Error file created at: {error_file_path}", source=agent_name, level="ERROR")
-
-    # Exit with error code
+    emit_output(
+        f"[Error] Agent '{agent_name}' failed: {agent_result.error_message}",
+        source=agent_name,
+        level="ERROR",
+    )
+    emit_output(
+        f"[Error] Error file created at: {error_file_path}",
+        source=agent_name,
+        level="ERROR",
+    )
     sys.exit(1)
 
 
@@ -60,17 +58,23 @@ def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
 # Constants
 # =============================================================================
 
-# Marker patterns for parsing agent responses
+MARKER_DATAFLOW_RECORD_START = "--- dataflow record start ---"
+MARKER_DATAFLOW_RECORD_END = "--- dataflow record end ---"
+MARKER_NODE_INDEX_START = "--- node index start ---"
+MARKER_NODE_INDEX_END = "--- node index end ---"
+MARKER_NODE_NAME_START = "--- node name start ---"
+MARKER_NODE_NAME_END = "--- node name end ---"
 MARKER_PARAMS_START = "--- parameters start ---"
 MARKER_PARAMS_END = "--- parameters end ---"
 MARKER_MEMBERS_START = "--- member variables start ---"
 MARKER_MEMBERS_END = "--- member variables end ---"
+MARKER_NON_LOCAL_SOURCES_START = "--- non-local sources start ---"
+MARKER_NON_LOCAL_SOURCES_END = "--- non-local sources end ---"
 
-# Markers for filter logic
 MARKER_FILTER_START = "--- filter logic start ---"
 MARKER_FILTER_END = "--- filter logic end ---"
-MARKER_DATAFLOW_START = "--- dataflow start ---"
-MARKER_DATAFLOW_END = "--- dataflow end ---"
+MARKER_AFFECTED_ITEM_START = "--- affected item start ---"
+MARKER_AFFECTED_ITEM_END = "--- affected item end ---"
 MARKER_DESCRIPTION_START = "--- description start ---"
 MARKER_DESCRIPTION_END = "--- description end ---"
 MARKER_FILE_START = "--- file start ---"
@@ -78,19 +82,16 @@ MARKER_FILE_END = "--- file end ---"
 MARKER_LINES_START = "--- lines start ---"
 MARKER_LINES_END = "--- lines end ---"
 
-# Markers for final decision
 MARKER_DECISION_START = "--- decision start ---"
 MARKER_DECISION_END = "--- decision end ---"
 MARKER_CONFIDENCE_START = "--- confidence start ---"
 MARKER_CONFIDENCE_END = "--- confidence end ---"
 MARKER_SUMMARY_START = "--- summary start ---"
 MARKER_SUMMARY_END = "--- summary end ---"
-MARKER_REASONING_START = "--- reasoning start ---"
-MARKER_REASONING_END = "--- reasoning end ---"
 
 
 # =============================================================================
-# Helper Functions
+# Generic Parsers
 # =============================================================================
 
 def _parse_marked_section(text: str, start_marker: str, end_marker: str) -> Optional[str]:
@@ -104,8 +105,9 @@ def _parse_marked_section(text: str, start_marker: str, end_marker: str) -> Opti
 
     Returns:
         The extracted content stripped of leading/trailing whitespace,
-        or None if markers not found.
+        or None if markers are not found.
     """
+
     pattern = rf"{re.escape(start_marker)}\n(.*?)\n{re.escape(end_marker)}"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1).strip() if match else None
@@ -123,11 +125,11 @@ def _parse_list_section(text: str, start_marker: str, end_marker: str) -> List[s
     Returns:
         List of items (non-empty lines), or empty list if markers not found.
     """
+
     content = _parse_marked_section(text, start_marker, end_marker)
     if content is None or content.lower() == "none":
         return []
 
-    # Split by newlines and filter empty lines
     items = [line.strip().lstrip("- ").strip() for line in content.split("\n")]
     return [item for item in items if item]
 
@@ -142,6 +144,7 @@ def _parse_line_range(text: str) -> Optional[tuple]:
     Returns:
         Tuple of (start, end) or None if parsing fails
     """
+
     if not text or text.lower() == "unknown":
         return None
 
@@ -173,76 +176,123 @@ def _build_call_chain_display(path: List[PathNode]) -> str:
     Returns:
         String like "source -> func1 -> func2 -> sink"
     """
-    names = [node.name for node in path]
+
+    names = [node.function_name for node in path]
     names.append("sink")
     return " -> ".join(names)
 
 
+def _format_dataflow_items(info: DataflowInfo) -> str:
+    """
+    Format a DataflowInfo object for prompts.
+
+    Args:
+        info: DataflowInfo to format
+
+    Returns:
+        Multi-line string describing the dataflow items
+    """
+
+    params = "\n".join([f"  - {item}" for item in info.parameters]) if info.parameters else "  (None)"
+    members = "\n".join([f"  - {item}" for item in info.member_variables]) if info.member_variables else "  (None)"
+    non_local_sources = (
+        "\n".join([f"  - {item}" for item in info.non_local_sources])
+        if info.non_local_sources else "  (None)"
+    )
+
+    return f"""Parameters:
+{params}
+
+Member Variables:
+{members}
+
+NonLocalSources:
+{non_local_sources}
+"""
+
+
 # =============================================================================
-# One Hop Dataflow Agent
+# Dataflow Agent
 # =============================================================================
 
-# System prompt for dataflow analysis
-_ONE_HOP_DATAFLOW_SYSTEM_PROMPT = """
+_DATAFLOW_SYSTEM_PROMPT = """
 You are a security expert specializing in precise data flow analysis.
-
-# Task
-
-Analyze the data flow from the current function to the next function (or directly to sink), determining which **specific fields** of parameters and member variables of the current function flow to the sink's key semantics.
 
 # Key Concepts
 
-* **Sink Semantics**: The critical data that determines the security impact - this refers to the INPUT (parameter or member variable) that carries the path/command/code/sql/url semantic, not a parameter named "path" or "command":
-  - For PathTraversal: The input that determines the file path being accessed
-  - For CommandInjection: The input that determines the command being executed
-  - For CodeInjection: The input that determines the code being executed
-  - For SQLInjection: The input that determines the SQL query being executed
-  - For SSRF: The input that determines the request target (URL, domain, IP, host, etc.) being accessed
-* **Indirect Sink Semantics**: A parameter may carry the semantic indirectly if the sink's logic uses it to determine the final value. Example: `Runtime.exec("sh -c $CMD", envp)` - the `envp` parameter carries command semantic because the fixed command references `$CMD` from environment variables.
-* **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql/url, this creates an implicit data flow. Consider these channels when analyzing. Note: Only consider such operations within the current call chain; do not check other endpoints.
-* **Precise Field Tracking**: You must trace data flow to the most granular field level possible, not just parameter/member names.
+* **Sink Semantics**: The critical data that determines the security impact:
+  - For PathTraversal: the data that determines the file path being accessed
+  - For CommandInjection: the data that determines the command being executed
+  - For CodeInjection: the data that determines the code being executed
+  - For SQLInjection: the data that determines the SQL query being executed
+  - For SSRF: the data that determines the request target (URL, domain, IP, host, etc.)
+
+* **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`. * **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`. Do not overlook such cases when identifying sink semantics.
+
+# Task
+
+Analyze the COMPLETE call chain from sink to source and determine, for EVERY method in the chain, which contents of the method finally become the sink's key semantics.
+
+# For Each Method, You MUST Return Exactly These Three Kinds of Information
+
+1. **Parameters**: Which parameters of THIS method finally become sink semantics.
+   - Use only parameter names from this method definition.
+   - Do NOT use deep field paths.
+2. **Member Variables**: Which member variables of THIS method finally become sink semantics.
+   - Use only `this.<memberName>` format.
+   - Do NOT use deep field paths.
+3. **NonLocalSources**: Data flow can exist outside direct argument passing. If a function reads data from configuration, database, file, cache, environment variable, external response, or any other non-local source, and that value later becomes sink semantics, you must record it under `NonLocalSources`.
+   - This includes reads from configuration, database, file, cache, environment variables, external responses, and similar non-local inputs.
+   - Keep each description extremely concise, but specific about what was read.
+   - Required format:
+     `This method reads <specific content> from <non-local source>, which ultimately becomes the sink semantics`
+   - Good examples:
+     `This method reads the storage.root configuration value from application.yml, which ultimately becomes the sink semantics`
+     `This method reads the avatar_path field value from the users table, which ultimately becomes the sink semantics`
+     `This method reads the cached value for download:path from Redis, which ultimately becomes the sink semantics`
+     `This method sends a request to http://example.com/path, and the response value ultimately becomes the sink semantics`
 
 # Output Format
 
 First, provide your analysis. Then, at the END of your response, provide a summary in this EXACT format:
 
 ```plaintext
+--- dataflow record start ---
+--- node index start ---
+<node index>
+--- node index end ---
+
+--- node name start ---
+<method name>
+--- node name end ---
+
 --- parameters start ---
-<param.subfield1.subfield2>
-<param2.nestedField>
+<param_name>
+<param_name>
 --- parameters end ---
 
 --- member variables start ---
-<this.member.nestedField.deepField>
-<this.anotherMember>
+<this.memberName>
+<this.otherMember>
 --- member variables end ---
+
+--- non-local sources start ---
+This method reads <specific content> from <non-local source>, which ultimately becomes the sink semantics
+This method reads <specific content> from <non-local source>, which ultimately becomes the sink semantics
+--- non-local sources end ---
+--- dataflow record end ---
 ```
 
-If there are no parameters or member variables that flow to sink semantics, write "None" in that section.
-
-# Format Requirements (CRITICAL)
-
-* **Be Granular**: Always trace to the deepest field level that flows to sink semantics.
-  - Good: `request.path`, `user.profile.homeDir`, `config.basePath.prefix`
-  - Bad: `request`, `user`, `config` (too coarse-grained)
-* **Parameter Format**: `<paramName>.<field>.<field>.<field>` - trace through all nested accesses
-* **Member Variable Format**: `this.<memberName>.<field>.<field>.<field>` - include `this.` prefix
-* **For Static Methods**: Member variables are not applicable, focus only on parameters
-
-# Analysis Approach
-
-1. **Check Known Dataflow First**: The input provides information about what specific fields in the next function (or sink) flows to sink semantics. Your analysis should be completed based on this information.
-2. **Trace Backwards**: Starting from those fields in the next function, trace back through the current function's code to find which specific fields of the current function's parameters/member variables provide that data.
-3. **Follow Field Accesses**: When you see code like `param.getField().getSubField()`, the dataflow is `param.field.subField`, not just `param`.
-4. **Read Necessary Code**: You may need to read specific files to understand function implementations, class member variables, etc., to confirm how data is propagated or to be granular.
-5. **Handle Transformations**: Even if data is transformed (e.g., `param.getPath()` becomes `Paths.get(path)`), trace the original source field.
+Output one `--- dataflow record start ---` block for EVERY method in the call chain.
+If a section has no result, write `None` in that section.
 
 # Important Rules
 
-* **Data Flow Only**: Track where data comes from. Do NOT consider security filtering or sanitization.
-* **Be Precise**: Only list the specific fields that actually flow to sink semantics.
-* **Match the Target**: Your output should map to the known dataflow from the next function to sink.
-* **Scope Limited**: The specific fields in result must be parameters or member variables of the current function. Do not return anything that is not a parameter or member variable of the current function.
+* **Whole Chain at Once**: Analyze the entire chain in one pass, from sink to source, without omitting any method.
+* **Be Complete**: You must list, for every method, all parameters, member variables, and non-local sources that become sink semantics, without any omissions.
+* **Method Scope**: For a method's NonLocalSources, include all non-local data reads that occur within the method itself, as well as in any methods it directly or indirectly calls, up to the point where execution reaches the next method in the chain.
+* **Do Not Analyze Filtering**: Perform data flow analysis faithfully. Do NOT analyze sanitization or exploitability here.
+* **No Deep Field Requirement**: Do not output `param.field.subfield`; only output the method parameter name itself. For members, only output `this.member`.
 
 # Restrictions
 
@@ -250,233 +300,188 @@ If there are no parameters or member variables that flow to sink semantics, writ
 """.strip()
 
 
-def one_hop_dataflow_agent(
-    target_path: str,
-    path: PotentialPath,
-    node_index: int,
-    next_node_dataflow: Optional[DataflowInfo] = None
-) -> DataflowInfo:
+def dataflow_agent(target_path: str, path: PotentialPath) -> List[NodeDataflowRecord]:
     """
-    Analyze dataflow from a node to the sink.
-
-    This agent analyzes which parameters and member variables of the node at
-    node_index flow to the sink's key semantics.
+    Analyze dataflow for the complete call chain.
 
     Args:
         target_path: Path to the target project's source code.
         path: PotentialPath containing the call chain.
-        node_index: Index of the current node being analyzed (0-based).
-        next_node_dataflow: DataflowInfo from the next node's analysis.
-                           For the sink's direct caller, this is None.
 
     Returns:
-        DataflowInfo containing parameters and member variables that flow to sink.
-
-    Note:
-        For the last node (sink's direct caller), next_node_dataflow should be None,
-        indicating we analyze what flows to the sink's key parameter directly.
+        List of NodeDataflowRecord, one per method in the call chain
     """
-    if node_index < 0 or node_index >= len(path.path):
-        log_error("one_hop_dataflow_agent", f"Invalid node_index: {node_index}")
-        return DataflowInfo()
 
-    current_node = path.path[node_index]
+    if not path.path:
+        log_warning("dataflow_agent", "Empty path provided")
+        return []
 
-    # Determine if this is the last node (direct caller of sink)
-    is_last_node = (node_index == len(path.path) - 1)
+    update_agent("dataflow_agent", "running", f"Analyzing {len(path.path)} node(s)")
+    log_info("dataflow_agent", f"Analyzing full-chain dataflow for {len(path.path)} node(s)")
 
-    # Build agent display info
-    position_info = "sink caller" if is_last_node else f"node[{node_index}]"
-    update_agent("one_hop_dataflow_agent", "running", f"Analyzing: {current_node.name} ({position_info})")
-    log_info("one_hop_dataflow_agent", f"Analyzing dataflow for: {current_node.name}")
-
-    # Build call chain from current node to sink only
-    remaining_chain = [node.name for node in path.path[node_index:]]
-    remaining_chain.append("sink")
-    call_chain_to_sink = " -> ".join(remaining_chain)
-
-    # Build user prompt
-    # Build the base prompt - Sink Expression only shown when next hop is sink
-    if is_last_node:
-        user_prompt = f"""# Analysis Context
+    call_chain_display = _build_call_chain_display(path.path)
+    user_prompt = f"""# Analysis Context
 
 **Vulnerability Type**: {path.vulnerability_type}
 **Sink Expression**: {path.sink_expression}
 
-## Call Chain (from current to sink)
-{call_chain_to_sink}
+## Call Chain
+{call_chain_display}
 
-## Current Function - `{current_node.name}`
-File: {current_node.file}
+"""
+
+    for index, node in enumerate(path.path):
+        source_code = read_source_code_by_range(target_path, node)
+        user_prompt += f"""## Node {index} - `{node.function_name}`
+File: {node.file_path}
+Lines: {node.start_line}-{node.end_line}
 Source Code:
 ```
-{current_node.source_code}
+{source_code}
 ```
-"""
-    else:
-        user_prompt = f"""# Analysis Context
 
-**Vulnerability Type**: {path.vulnerability_type}
-
-## Call Chain (from current to sink)
-{call_chain_to_sink}
-
-## Current Function - `{current_node.name}`
-File: {current_node.file}
-Source Code:
-```
-{current_node.source_code}
-```
 """
 
-    # Add next function info if not the last node
-    if not is_last_node:
-        next_node = path.path[node_index + 1]
-        user_prompt += f"""
-## Next Function - `{next_node.name}`
-File: {next_node.file}
-Source Code:
-```
-{next_node.source_code}
-```
-"""
-        # Add dataflow info from next node's analysis - make this prominent
-        if next_node_dataflow:
-            params_str = '\n'.join([f"  - {p}" for p in next_node_dataflow.parameters]) if next_node_dataflow.parameters else "  (None)"
-            members_str = '\n'.join([f"  - {m}" for m in next_node_dataflow.member_variables]) if next_node_dataflow.member_variables else "  (None)"
+    user_prompt += """# Your Task
 
-            # Build member variable hint if there are member variables
-            member_hint = ""
-            if next_node_dataflow.member_variables:
-                member_hint = f"""
-**Note on `this` reference:** The `this` in the member variables above refers to the instance of {next_node.name}.
-In `{current_node.name}`'s code, identify what object this instance corresponds to:
-  - If called as xxx.{next_node.name}(...), then xxx is the instance of {next_node.name}
-  - If called as this.{next_node.name}(...) or directly {next_node.name}(...), then {current_node.name} and {next_node.name} share the same this instance (e.g., methods in the same class)
-You need to determine in {current_node.name}'s code exactly which object corresponds to this of {next_node.name}.
+Analyze the chain from sink to source and output one dataflow record for each node.
+For each node, return only:
+- method parameter names
+- `this.<member>` member variable names
+- concise `NonLocalSources` descriptions in the required format
 """
 
-            user_prompt += f"""
-## *** CRITICAL: Known Dataflow from `{next_node.name}` (Next Function) to Sink ***
-
-The following fields in `{next_node.name}` have been confirmed to flow to the sink's key semantics.
-Your task is to find which specific fields in `{current_node.name}` flow into THESE fields:
-
-**Parameters in `{next_node.name}` that reach sink:**
-{params_str}
-
-**Member Variables in `{next_node.name}` that reach sink:**
-{members_str}
-{member_hint}
-
-The overall dataflow path is: 
-
-{current_node.name}.??? -> {next_node.name}.above_fields -> ... -> sink.
-
-Your task is to trace the first part of this path: 
-
-{current_node.name}.??? -> {next_node.name}.above_fields
-"""
-        else:
-            user_prompt += f"""
-## Known Dataflow from `{next_node.name}` to Sink
-
-(No specific dataflow information available)
-"""
-    else:
-        # This is the last node - directly analyze what flows to sink
-        user_prompt += f"""
-## *** Sink Direct Caller ***
-
-This function directly calls the sink: `{path.sink_expression}`
-
-Your task is to find which specific fields in `{current_node.name}` flow to the sink's key semantic input (the data that determines the path/command/code/sql/url, which could be a parameter or member variable of the sink).
-
->>> For PathTraversal: trace which fields become the file path semantic
->>> For CommandInjection: trace which fields become the command semantic
->>> For CodeInjection: trace which fields become the code semantic
->>> For SQLInjection: trace which fields become the SQL query semantic
->>> For SSRF: trace which fields become the request target (URL/domain/IP/host) semantic
-"""
-
-    user_prompt += f"""
-# Your Task
-
-Trace the data flow from `{current_node.name}` to the known sink-bound fields listed above.
-Output the specific fields (param.field.subfield or this.member.field.subfield) that flow to sink.
-"""
-
-    # Clear stream buffer and execute agent with streaming
     clear_stream()
 
     agent_result = base_claude_agent(
         cwd=target_path,
-        system_prompt=_ONE_HOP_DATAFLOW_SYSTEM_PROMPT,
+        system_prompt=_DATAFLOW_SYSTEM_PROMPT,
         user_prompt=user_prompt,
-        stream_callback=stream_agent
+        stream_callback=stream_agent,
     )
 
-    # Handle agent failure
     if not agent_result.success:
-        _handle_agent_failure(agent_result, "one_hop_dataflow_agent")
+        _handle_agent_failure(agent_result, "dataflow_agent")
 
     result = agent_result.result
+    records = _parse_dataflow_records(result, path)
 
-    # Parse response
-    parameters = _parse_list_section(result, MARKER_PARAMS_START, MARKER_PARAMS_END)
-    member_variables = _parse_list_section(result, MARKER_MEMBERS_START, MARKER_MEMBERS_END)
+    update_agent("dataflow_agent", "completed", f"Found {len(records)} dataflow record(s)")
+    log_success("dataflow_agent", f"Found {len(records)} dataflow record(s)")
 
-    dataflow_info = DataflowInfo(
-        parameters=parameters,
-        member_variables=member_variables
-    )
-
-    update_agent("one_hop_dataflow_agent", "completed",
-                 f"Found: {len(parameters)} params, {len(member_variables)} members")
-    log_success("one_hop_dataflow_agent",
-                f"Dataflow: {len(parameters)} params, {len(member_variables)} members")
-
-    # Log the call
     log_agent_call(
-        agent_name="one_hop_dataflow_agent",
+        agent_name="dataflow_agent",
         user_prompt=user_prompt,
         model_output=result,
-        parsed_result=f"DataflowInfo(parameters={parameters}, member_variables={member_variables})"
+        parsed_result=str(
+            [
+                (
+                    f"NodeDataflowRecord(node_index={record.node_index}, "
+                    f"node_name={record.node_name}, "
+                    f"parameters={record.dataflow_info.parameters}, "
+                    f"member_variables={record.dataflow_info.member_variables}, "
+                    f"non_local_sources={record.dataflow_info.non_local_sources})"
+                )
+                for record in records
+            ]
+        ),
     )
 
-    return dataflow_info
+    return records
+
+
+def _parse_dataflow_records(text: str, path: PotentialPath) -> List[NodeDataflowRecord]:
+    """
+    Parse dataflow records from agent response.
+
+    Args:
+        text: Agent response text
+        path: PotentialPath used to validate node indices
+
+    Returns:
+        List of NodeDataflowRecord objects
+    """
+
+    results = []
+    pattern = rf"{re.escape(MARKER_DATAFLOW_RECORD_START)}(.*?){re.escape(MARKER_DATAFLOW_RECORD_END)}"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    for match in matches:
+        node_index_text = _parse_marked_section(match, MARKER_NODE_INDEX_START, MARKER_NODE_INDEX_END)
+        node_name = _parse_marked_section(match, MARKER_NODE_NAME_START, MARKER_NODE_NAME_END) or ""
+        parameters = _parse_list_section(match, MARKER_PARAMS_START, MARKER_PARAMS_END)
+        member_variables = _parse_list_section(match, MARKER_MEMBERS_START, MARKER_MEMBERS_END)
+        non_local_sources = _parse_list_section(
+            match,
+            MARKER_NON_LOCAL_SOURCES_START,
+            MARKER_NON_LOCAL_SOURCES_END,
+        )
+
+        try:
+            node_index = int(node_index_text) if node_index_text is not None else -1
+        except ValueError:
+            continue
+
+        if node_index < 0 or node_index >= len(path.path):
+            continue
+
+        if not node_name:
+            node_name = path.path[node_index].function_name
+
+        results.append(
+            NodeDataflowRecord(
+                node_index=node_index,
+                node_name=node_name,
+                dataflow_info=DataflowInfo(
+                    parameters=parameters,
+                    member_variables=member_variables,
+                    non_local_sources=non_local_sources,
+                ),
+            )
+        )
+
+    results.sort(key=lambda item: item.node_index)
+    return results
 
 
 # =============================================================================
 # One Hop Filter Agent
 # =============================================================================
 
-# System prompt for filter analysis
 _ONE_HOP_FILTER_SYSTEM_PROMPT = """
 You are a security expert specializing in vulnerability exploitation analysis.
 
+# Key Concepts
+
+* **Sink Semantics**: The critical data that determines the security impact:
+  - For PathTraversal: the data that determines the file path being accessed
+  - For CommandInjection: the data that determines the command being executed
+  - For CodeInjection: the data that determines the code being executed
+  - For SQLInjection: the data that determines the SQL query being executed
+  - For SSRF: the data that determines the request target (URL, domain, IP, host, etc.)
+
 # Task
 
-Given a known data flow from current function to next function (or directly to sink), analyze whether there exists any logic that could prevent the vulnerability from being exploited, regardless of whether that logic was designed for security purposes or not.
+Given the caller-side items in the current function that ultimately become sink semantics, analyze whether there exists any logic that could prevent the vulnerability from being exploited before the next function is called (or before the sink is reached directly), regardless of whether that logic was designed for security purposes or not.
 
 # Background Context
 
 You will be given:
-1. **Source fields in current function**: Specific fields (parameters/member variables) that flow to sink
-2. **Target fields in next function**: Specific fields (parameters/member variables) that receive the data and eventually flow to sink
-3. The source code of current function - THIS IS WHAT YOU ANALYZE
+1. **Caller-side sink-semantics items in current function**: Specific parameters/member variables/non-local sources in the current function that ultimately become sink semantics
+2. The source code of current function - THIS IS WHAT YOU ANALYZE
+3. The identity of the next hop (next function or sink), so you know where your analysis scope ends
 
-Your job is to examine the code path from source fields to target fields and identify any logic that could prevent exploitation.
+Your job is to examine the full execution scope from the moment the current function begins until the exact point where the next function is called (or the sink is invoked directly), including any project-internal methods directly or indirectly executed within that scope, and identify any logic that could prevent exploitation for each caller-side sink-semantics item.
 
 # Output Format
 
-First, provide your analysis. Then, at the END of your response, provide a summary for EACH logic found (or a single "no logic found" entry):
+First, provide your analysis. Then, at the END of your response, output ONE block per filter logic found:
 
 ```plaintext
 --- filter logic start ---
---- dataflow start ---
-<sourceField -> targetField>
---- dataflow end ---
+--- affected item start ---
+<caller-side item that ultimately becomes sink semantics>
+--- affected item end ---
 
 --- description start ---
 <What the logic does and how it might prevent exploitation>
@@ -492,42 +497,19 @@ First, provide your analysis. Then, at the END of your response, provide a summa
 --- filter logic end ---
 ```
 
-**IMPORTANT**: The `<sourceField -> targetField>` must use the EXACT field names provided in the input:
-- `sourceField` must be one of the source fields listed for current function
-- `targetField` must be one of the target fields listed for next function (or "sink" if direct call)
-
-If no logic is found that could prevent exploitation, output:
-
-```plaintext
---- filter logic start ---
---- dataflow start ---
-None
---- dataflow end ---
-
---- description start ---
-No blocking logic found
---- description end ---
-
---- file start ---
-None
---- file end ---
-
---- lines start ---
-None
---- lines end ---
---- filter logic end ---
-```
+Each block must describe exactly one filter logic.
+If no filter logic is found, do not output any `--- filter logic start ---` or `--- filter logic end ---` block.
 
 # What Could Prevent Exploitation (Not Limited to Security Logic)
 
 Look for ANY logic that could make the vulnerability unexploitable, including but NOT limited to:
 
-1. **Security-specific logic** (designed for security):
+1. **Security-specific logic**:
    - Input validation/sanitization
    - Path traversal detection
    - Command blacklist/whitelist
 
-2. **Business logic that may incidentally blocks exploitation**:
+2. **Business logic that may incidentally block exploitation**:
    - Data transformation/formatting that changes the value
    - String operations (concatenation, replacement, encoding)
    - Type conversions that alter the data
@@ -542,16 +524,13 @@ Look for ANY logic that could make the vulnerability unexploitable, including bu
    - The data being truncated or modified
    - The vulnerable code path being conditionally unreachable
 
-**KEY POINT**: Do NOT only look for "security filters". Many vulnerabilities become unexploitable due to ordinary business logic that was never designed with security in mind. Report ALL logic that could prevent exploitation.
-
 # Important Rules
 
-* **Scope**: Do NOT analyze the next function's internal logic. Analyzing the next function's code will NOT help you complete this task - your goal is to find any blocking logic in the current function (including any other processing functions it calls) from its start up to the point where the next function in the call chain is called.
-* **Read ALL Needed (MANDATORY)**: You MUST read and analyze ALL project-internal code (not third-party dependencies) along the data flow from Source fields to Target fields. This is NOT optional - you are required to actively search for, locate, and read EVERY file that handles this data within the project. Failure to read any relevant internal code before analysis is unacceptable.
-* **Relevance**: Only report logic that affects the specified source-to-target data flow.
+* **Strict Scope**: Only analyze the execution scope from the start of current function until the exact point where next function is called (or sink is called). Do NOT analyze logic after that point.
+* **Item Binding**: Every reported filter logic must be bound to the specific caller-side item (`parameter`, `this.member`, or `NonLocalSources` description) that it affects. Do not merge multiple unrelated items into one vague report.
+* **Complete Trace and Full Code Coverage (MANDATORY)**: For each sink-semantics item, you MUST follow its complete data flow from the beginning of the current function to the exact next-hop call site, and read ALL project-internal code involved at any step in carrying, copying, transforming, wrapping, checking, rewriting, resolving through helper methods, or combining that item with constants.
 * **Be Specific**: Provide exact file paths and line numbers.
 * **Comprehensive**: Consider ALL types of logic, not just security-related ones.
-* **Conservative**: When uncertain if something could prevent exploitation, include it.
 
 # Restrictions
 
@@ -564,191 +543,118 @@ def one_hop_filter_agent(
     path: PotentialPath,
     node_index: int,
     current_dataflow: DataflowInfo,
-    next_dataflow: Optional[DataflowInfo] = None
 ) -> List[FilterLogic]:
     """
-    Analyze filtering logic between two adjacent nodes.
-
-    This agent analyzes the code in the current node to find any logic
-    (security-related or not) that could prevent exploitation in the
-    data flow from current function's fields to next function's fields.
+    Analyze caller-side filtering logic before the next hop.
 
     Args:
         target_path: Path to the target project's source code.
         path: PotentialPath containing the call chain.
         node_index: Index of the current node being analyzed (0-based).
-        current_dataflow: DataflowInfo for current node (which fields flow to sink).
-        next_dataflow: DataflowInfo for next node (which fields flow to sink).
-                      For the sink's direct caller, this is None.
+        current_dataflow: DataflowInfo for current node.
 
     Returns:
         List of FilterLogic objects representing potential blocking logic found.
     """
+
     if node_index < 0 or node_index >= len(path.path):
         log_error("one_hop_filter_agent", f"Invalid node_index: {node_index}")
         return []
 
     current_node = path.path[node_index]
+    is_last_node = node_index == len(path.path) - 1
+    current_source_code = read_source_code_by_range(target_path, current_node)
 
-    # Determine if this is the last node (direct caller of sink)
-    is_last_node = (node_index == len(path.path) - 1)
-
-    # Build agent display info with actual function names
     if is_last_node:
-        position_info = f"{current_node.name} -> sink"
+        position_info = f"{current_node.function_name} -> sink"
+        next_hop_label = "sink"
+        analysis_boundary = f"the sink call `{path.sink_expression}`"
+        next_hop_info_block = f"""# Next Hop Info
+
+This hop goes directly to the sink.
+Use the sink call `{path.sink_expression}` only to locate the analysis boundary.
+Do not analyze any logic after the sink call.
+"""
     else:
         next_node = path.path[node_index + 1]
-        position_info = f"{current_node.name} -> {next_node.name}"
+        position_info = f"{current_node.function_name} -> {next_node.function_name}"
+        next_hop_label = next_node.function_name
+        analysis_boundary = f"the call to `{next_node.function_name}`"
+        next_source_code = read_source_code_by_range(target_path, next_node)
+        next_hop_info_block = f"""# Next Hop Info
+
+Use this only to locate the analysis boundary.
+Do not analyze any logic after `{next_node.function_name}` is called.
+
+File: {next_node.file_path}
+Lines: {next_node.start_line}-{next_node.end_line}
+
+```text
+{next_source_code}
+```
+"""
     update_agent("one_hop_filter_agent", "running", f"Analyzing: {position_info}")
-    log_info("one_hop_filter_agent", f"Analyzing logic in: {current_node.name}")
+    log_info("one_hop_filter_agent", f"Analyzing logic in: {current_node.function_name}")
 
-    # Build source fields strings (separate parameters and member variables)
-    source_params_str = '\n'.join([f"  - {p}" for p in current_dataflow.parameters]) if current_dataflow.parameters else "  (None)"
-    source_members_str = '\n'.join([f"  - {m}" for m in current_dataflow.member_variables]) if current_dataflow.member_variables else "  (None)"
+    source_info_str = _format_dataflow_items(current_dataflow)
 
-    # Build user prompt
-    if is_last_node:
-        # Direct call to sink
-        user_prompt = f"""# Analysis Context
+    user_prompt = f"""# Context
 
-**Vulnerability Type**: {path.vulnerability_type}
+Vulnerability Type: {path.vulnerability_type}
+Sink Expression: {path.sink_expression}
+Current Function: {current_node.function_name}
+Next Hop: {next_hop_label}
+Analysis Boundary: from the entry of `{current_node.function_name}` to {analysis_boundary}
 
-## Data Flow to Analyze
+# Current Function Source
 
-The following fields in `{current_node.name}` have been confirmed to flow to the sink `{path.sink_expression}`:
+File: {current_node.file_path}
+Lines: {current_node.start_line}-{current_node.end_line}
 
-**Source Fields (in `{current_node.name}`):**
-
-Parameters:
-{source_params_str}
-
-Member Variables:
-{source_members_str}
-
-**Target:** sink (the input carrying the path/command semantic, which could be a parameter or member variable)
-
-## Current Function - `{current_node.name}`
-File: {current_node.file}
-Source Code:
-```
-{current_node.source_code}
+```text
+{current_source_code}
 ```
 
-# Your Task
+{next_hop_info_block}
 
-Analyze the code in `{current_node.name}` to find ANY logic that could prevent the vulnerability from being exploited.
+# Caller-Side Items That Become Sink Semantics
 
-**Do NOT limit your analysis to security-specific code.** Look for ALL logic that could block exploitation, including:
-- Security validation/sanitization (if any)
-- Business logic that transforms or restricts the data
-- Conditional branches that might skip the sink call
-- Data operations that change the value
-- Any other logic affecting the data flow
-
-Output your findings in the specified format. The dataflow in output should be: `<sourceField -> sink>`
-"""
-    else:
-        next_node = path.path[node_index + 1]
-
-        # Build target fields strings (separate parameters and member variables)
-        target_params_str = '\n'.join([f"  - {p}" for p in next_dataflow.parameters]) if next_dataflow and next_dataflow.parameters else "  (None)"
-        target_members_str = '\n'.join([f"  - {m}" for m in next_dataflow.member_variables]) if next_dataflow and next_dataflow.member_variables else "  (None)"
-
-        # Build member variable hint if there are member variables in target
-        member_hint = ""
-        if next_dataflow and next_dataflow.member_variables:
-            member_hint = f"""
-**Note on `this` reference:** The `this` in the member variables above refers to the instance of {next_node.name}.
-In `{current_node.name}`'s code, identify what object this instance corresponds to:
-  - If called as xxx.{next_node.name}(...), then xxx is the instance of {next_node.name}
-  - If called as this.{next_node.name}(...) or directly {next_node.name}(...), then {current_node.name} and {next_node.name} share the same this instance (e.g., methods in the same class)
-You need to determine in {current_node.name}'s code exactly which object corresponds to this of {next_node.name}.
+{source_info_str}
 """
 
-        user_prompt = f"""# Analysis Context
-
-**Vulnerability Type**: {path.vulnerability_type}
-
-## *** CRITICAL: Known Data Flow ***
-
-The following data flow has been confirmed through previous analysis:
-
-**Source Fields (in `{current_node.name}`) that flow to sink:**
-
-Parameters:
-{source_params_str}
-
-Member Variables:
-{source_members_str}
-
-**Target Fields (in `{next_node.name}`) that receive the data and eventually flow to sink:**
-
-Parameters:
-{target_params_str}
-
-Member Variables:
-{target_members_str}
-{member_hint}
-This means: `{current_node.name}`.sourceFields -> `{next_node.name}`.targetFields -> ... -> sink
-
-## Current Function - `{current_node.name}` (Analyze This)
-File: {current_node.file}
-Source Code:
-```
-{current_node.source_code}
-```
-
-## Next Function - `{next_node.name}` (Reference Only)
-File: {next_node.file}
-Source Code:
-```
-{next_node.source_code}
-```
-
-# Your Task
-
-Analyze the code in `{current_node.name}` to find ANY logic that could prevent the vulnerability from being exploited.
-
-**Do NOT limit your analysis to security-specific code.** Look for ALL logic that could block exploitation, including:
-- Security validation/sanitization (if any)
-- Business logic that transforms or restricts the data before passing to `{next_node.name}`
-- Conditional branches that might skip the call to `{next_node.name}`
-- Data operations (concatenation, encoding, transformation) that change the value
-- Any other logic affecting the source-to-target data flow
-
-Output your findings in the specified format. The dataflow in output should be: `<sourceField -> targetField>`
-where sourceField is from the source fields list and targetField is from the target fields list.
-"""
-
-    # Clear stream buffer and execute agent with streaming
     clear_stream()
 
     agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_ONE_HOP_FILTER_SYSTEM_PROMPT,
         user_prompt=user_prompt,
-        stream_callback=stream_agent
+        stream_callback=stream_agent,
     )
 
-    # Handle agent failure
     if not agent_result.success:
         _handle_agent_failure(agent_result, "one_hop_filter_agent")
 
     result = agent_result.result
-
-    # Parse filter logic blocks
     filter_logics = _parse_filter_logics(result, node_index)
 
     update_agent("one_hop_filter_agent", "completed", f"Found {len(filter_logics)} blocking logic")
     log_success("one_hop_filter_agent", f"Found {len(filter_logics)} blocking logic")
 
-    # Log the call
-    parsed_result_str = str([f"FilterLogic(dataflow={f.dataflow}, description={f.description[:50]}..., file_path={f.file_path}, line_range={f.line_range})" for f in filter_logics])
+    parsed_result_str = str(
+        [
+            (
+                f"FilterLogic(dataflow={logic.dataflow}, "
+                f"description={logic.description[:50]}..., "
+                f"file_path={logic.file_path}, line_range={logic.line_range})"
+            )
+            for logic in filter_logics
+        ]
+    )
     log_agent_call(
         agent_name="one_hop_filter_agent",
         user_prompt=user_prompt,
         model_output=result,
-        parsed_result=parsed_result_str
+        parsed_result=parsed_result_str,
     )
 
     return filter_logics
@@ -765,31 +671,36 @@ def _parse_filter_logics(text: str, node_index: int = -1) -> List[FilterLogic]:
     Returns:
         List of FilterLogic objects
     """
-    results = []
 
-    # Find all filter logic blocks
+    results = []
     pattern = rf"{re.escape(MARKER_FILTER_START)}(.*?){re.escape(MARKER_FILTER_END)}"
     matches = re.findall(pattern, text, re.DOTALL)
 
     for match in matches:
-        dataflow = _parse_marked_section(match, MARKER_DATAFLOW_START, MARKER_DATAFLOW_END)
+        dataflow = _parse_marked_section(match, MARKER_AFFECTED_ITEM_START, MARKER_AFFECTED_ITEM_END)
         description = _parse_marked_section(match, MARKER_DESCRIPTION_START, MARKER_DESCRIPTION_END)
         file_path = _parse_marked_section(match, MARKER_FILE_START, MARKER_FILE_END)
         lines_str = _parse_marked_section(match, MARKER_LINES_START, MARKER_LINES_END)
 
-        # Skip "None" entries
         if dataflow and dataflow.lower() == "none":
             continue
 
+        if dataflow:
+            dataflow = re.split(r"\s*(?:->|→)\s*", dataflow, maxsplit=1)[0].strip()
+            if not dataflow:
+                continue
+
         if dataflow and description:
             line_range = _parse_line_range(lines_str) if lines_str else None
-            results.append(FilterLogic(
-                dataflow=dataflow,
-                description=description,
-                file_path=file_path or "Unknown",
-                line_range=line_range,
-                node_index=node_index
-            ))
+            results.append(
+                FilterLogic(
+                    dataflow=dataflow,
+                    description=description,
+                    file_path=file_path or "Unknown",
+                    line_range=line_range,
+                    node_index=node_index,
+                )
+            )
 
     return results
 
@@ -798,13 +709,21 @@ def _parse_filter_logics(text: str, node_index: int = -1) -> List[FilterLogic]:
 # Final Decision Agent
 # =============================================================================
 
-# System prompt for final decision
 _FINAL_DECISION_SYSTEM_PROMPT = """
 You are a senior security expert conducting a thorough vulnerability exploitation analysis.
 
 # Task
 
 Trace the complete data flow from source to sink, function by function, to determine whether this vulnerability is actually exploitable. Do NOT simply accept previous analysis results at face value - verify and think critically.
+
+# Key Concepts
+
+* **Sink Semantics**: The critical data that determines the security impact:
+  - For PathTraversal: the data that determines the file path being accessed
+  - For CommandInjection: the data that determines the command being executed
+  - For CodeInjection: the data that determines the code being executed
+  - For SQLInjection: the data that determines the SQL query being executed
+  - For SSRF: the data that determines the request target (URL, domain, IP, host, etc.)
 
 # Analysis Approach
 
@@ -813,23 +732,23 @@ You should analyze the call chain from source to sink, one function at a time:
 1. **For each function in the chain**:
    - Start with the provided source code
    - Read additional files if needed to understand the full context (class members, called methods, etc.)
-   - With the help of the provided analysis, trace how data flows through this function and identify any logic that might prevent exploitation
+   - With the help of the provided analysis, trace which caller-side items in this function ultimately become sink semantics and identify any logic that might prevent exploitation before the next hop
    - Form a intermediate conclusion and carry it to the next function
 
 2. **Be critical of provided analysis**:
-   - Previous analysis identified dataflows and potential blocking logic
+   - Previous analysis identified sink-semantics items for each function that ultimately become sink semantics and potential blocking logic affecting those items before each hop
    - These may be incomplete or incorrect - verify them yourself
    - A "blocking logic" identified earlier might be bypassable
 
 3. **Think about exploitability**:
    - Can user input actually control the sink's key semantic (path/command/code/sql/url)?
-      - **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`.
+      - **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`. * **Indirect Semantics**: A parameter may carry path/command/code/sql/url semantic indirectly. For example, in `Runtime.exec("sh -c $CMD", envp)`, even though `envp` is "just environment variables", it actually carries the **command semantic** because the fixed command template references and executes `$CMD`. Do not overlook such cases when identifying sink semantics.
       - **Out-of-Band Data Flow**: Data flow can exist outside direct code paths. If user writes to persistent storage (env var, config, file, database) that is later read and used as path/command/code/sql/url, this creates an implicit data flow. Consider these channels when analyzing. Note: Such data flows may exist outside the current call chain; for example, if a database field read in the current call chain is used as a file write path, check if other endpoints allow users to set that field, making the current call chain exploitable. Ensure the analysis focuses on the exploitability of the current call chain.
    - Are there any conditions, transformations, or logic that prevent exploitation?
    - Is the blocking logic effective, or can it be bypassed?
 
-4. **Check the Mistake Notebook**:
-   - Repeating the same mistakes is strictly prohibited.
+4. **Check the Mistake Notebook (MANDATORY)**:
+   - Repeating the same mistakes is STRICTLY PROHIBITED.
 
 # Output Format
 
@@ -862,9 +781,9 @@ First, provide your complete analysis. Then, at the END of your response, provid
 
 # Important Rules
 
-* **Do Your Own Analysis**: Do not blindly trust the provided dataflow/blocking logic analysis. Verify and think critically.
-* **Read Files When Needed**: If you need more context, read the relevant files.
 * **Think Step by Step**: Analyze function by function from source to sink.
+* **Do Your Own Analysis**: Do not blindly trust the provided dataflow/blocking logic analysis. Verify and think critically.
+* **Read Files When Needed**: If you need more context, read the relevant files. Make sure you have enough code information.
 * **Consider Bypass**: Even if blocking logic exists, consider whether it can be bypassed.
 * **Stay Focused**: Only analyze THIS specific call chain and THIS vulnerability type. Do NOT investigate other potential vulnerabilities, other code paths, or unrelated security issues.
 * **Check Mistake Notebook**: Check the Mistake Notebook. **Do NOT repeat the same mistakes documented there**.
@@ -874,16 +793,20 @@ First, provide your complete analysis. Then, at the END of your response, provid
 
 This section documents some typical mistakes you have made in the past. You MUST avoid repeating them:
 
-- Mistake: Believed that new java.io.File(xxx, "/yyy") ignores xxx (which was fully user-controlled) and always resolves to the absolute path /yyy, thus assuming no path traversal vulnerability existed.
-- Correction: The path actually resolves to xxx/yyy, therefore a path traversal vulnerability exists in that scenario.
+- Mistake: Incorrectly assumed that in new java.io.File(xxx, "/yyy"), supplying an absolute path as the second argument causes the first argument xxx to be ignored, so the result was treated as always resolving to /yyy.
+- Correction: In reality, the path resolves to xxx/yyy.
 
 - Mistake: Believed that HTTP header names cannot contain special characters.
-- Correction: HTTP header names are able to be controlled by the user and are able to contain arbitrary strings, including special characters.
+- Correction: HTTP header names are able to contain arbitrary strings, including special characters.
 
-- Mistake: Believed that the second parameter of Runtime.exec (the envp array) could not be controlled to set specific environment variables, thus dismissing command injection via environment variables.
-- Correction: If the envp array is user-controllable, entries in the format X=Y allow the user to set arbitrary environment variables to arbitrary values.
+- Mistake: Incorrectly assumed that the second parameter (the `envp` array parameter) of Runtime.exec could not be used to set specific environment variables.
+- Correction: In reality, if the second parameter is controllable, arbitrary environment variables can be set to arbitrary values via entries in the form X=Y.
 
-These corrections are empirically verified facts. Do not waste any time questioning or doubting them—accept them as absolute truth.
+- Mistake: Incorrectly assumed that filtering `.` or `./` was insufficient because path traversal could still be achieved through inputs like `..` or `../`.
+- Correction: Inputs containing `.` or `./` have already been filtered, so sequences such as `..` or `../` containing `.` or `./` cannot pass through that code path.
+- Generalization: If a string is filtered in a way that cannot be bypassed, then any payload containing that substring is also invalid.
+
+These corrections are empirically verified facts. Do NOT waste any time questioning or doubting them—accept them as absolute truth, even if you believe otherwise.
 
 # Restrictions
 
@@ -895,13 +818,10 @@ def final_decision_agent(
     target_path: str,
     path: PotentialPath,
     dataflow_records: List[NodeDataflowRecord],
-    filter_logics: List[FilterLogic]
+    filter_logics: List[FilterLogic],
 ) -> tuple:
     """
     Make the final vulnerability determination.
-
-    This agent analyzes all collected information to determine whether
-    the path represents an exploitable vulnerability.
 
     Args:
         target_path: Path to the target project's source code.
@@ -912,13 +832,12 @@ def final_decision_agent(
     Returns:
         Tuple of (is_vulnerable: bool, confidence: str, summary: str)
     """
+
     update_agent("final_decision_agent", "running", "Making final determination")
     log_info("final_decision_agent", "Making final vulnerability determination")
 
-    # Build call chain display with function names
     call_chain_display = _build_call_chain_display(path.path)
 
-    # Build user prompt - organize by node, each with its own info
     user_prompt = f"""# Vulnerability Path Analysis
 
 **Vulnerability Type**: {path.vulnerability_type}
@@ -932,110 +851,48 @@ def final_decision_agent(
 
 """
 
-    # Build per-node information
     for i, node in enumerate(path.path):
-        # Find corresponding dataflow record for current node
         current_record = None
-        for r in dataflow_records:
-            if r.node_index == i:
-                current_record = r
+        for record in dataflow_records:
+            if record.node_index == i:
+                current_record = record
                 break
 
-        # Find corresponding dataflow record for next node
-        next_record = None
-        if i + 1 < len(path.path):
-            for r in dataflow_records:
-                if r.node_index == i + 1:
-                    next_record = r
-                    break
+        node_filters = [logic for logic in filter_logics if logic.node_index == i]
+        source_code = read_source_code_by_range(target_path, node)
 
-        # Determine if this is the last node (direct caller of sink)
-        is_last_node = (i == len(path.path) - 1)
+        user_prompt += f"""## Node {i}: `{node.function_name}`
 
-        # Find filter logics for THIS hop only (by node_index)
-        node_filters = [f for f in filter_logics if f.node_index == i]
+### a) Basic Information
 
-        user_prompt += f"""## Node {i}: `{node.name}`
-
-**File:** {node.file}
+**File:** {node.file_path}
+**Lines:** {node.start_line}-{node.end_line}
 
 **Source Code:**
 ```
-{node.source_code}
+{source_code}
 ```
 
 """
 
         if current_record:
-            if is_last_node:
-                # Last node - flows directly to sink
-                user_prompt += f"""**How `{node.name}` flows to sink:**
+            current_info_text = _format_dataflow_items(current_record.dataflow_info)
+            user_prompt += f"""### b) Items in `{node.function_name}` that eventually become sink semantics
 
-`{node.name}`'s fields:
-- Parameters: {', '.join(current_record.dataflow_info.parameters) if current_record.dataflow_info.parameters else 'None'}
-- Member Variables: {', '.join(current_record.dataflow_info.member_variables) if current_record.dataflow_info.member_variables else 'None'}
+{current_info_text}
 
-flow directly to sink.
-
-"""
-            else:
-                # Not last node - flows to next node
-                next_node = path.path[i + 1]
-
-                # Build current node's fields
-                current_params = ', '.join(current_record.dataflow_info.parameters) if current_record.dataflow_info.parameters else 'None'
-                current_members = ', '.join(current_record.dataflow_info.member_variables) if current_record.dataflow_info.member_variables else 'None'
-
-                # Build next node's fields
-                if next_record:
-                    next_params = ', '.join(next_record.dataflow_info.parameters) if next_record.dataflow_info.parameters else 'None'
-                    next_members = ', '.join(next_record.dataflow_info.member_variables) if next_record.dataflow_info.member_variables else 'None'
-                else:
-                    next_params = 'Unknown'
-                    next_members = 'Unknown'
-
-                user_prompt += f"""**How `{node.name}` flows to `{next_node.name}` and eventually to sink:**
-
-`{node.name}`'s fields:
-- Parameters: {current_params}
-- Member Variables: {current_members}
-
-flow to `{next_node.name}`'s fields:
-
-"""
-
-                # Add `this` note only if there are member variables in next node
-                if next_record and next_record.dataflow_info.member_variables:
-                    user_prompt += f"""> **Note on `this`**: `this` refers to the instance of the called function. `xxx.{next_node.name}()` means `this` of `{next_node.name}` = `xxx`; `this.{next_node.name}()` or direct `{next_node.name}()` means `this` = current function's instance. Determine what `this` refers to based on context.
-
-"""
-
-                user_prompt += f"""- Parameters: {next_params}
-- Member Variables: {next_members}
-
-and eventually to sink.
-
-"""
-
-            # Add potential blocking logic for this hop
-            if is_last_node:
-                user_prompt += f"""**Potential blocking logic in `{node.name}` → sink:**
-
-"""
-            else:
-                next_node = path.path[i + 1]
-                user_prompt += f"""**Potential blocking logic in `{node.name}` → `{next_node.name}`:**
+### c) Potential blocking logic
 
 """
 
             if node_filters:
-                for f in node_filters:
-                    location = f.file_path
-                    if f.line_range:
-                        location += f" (lines {f.line_range[0]}-{f.line_range[1]})"
-                    user_prompt += f"""- Dataflow: {f.dataflow}
-  Description: {f.description}
-  Location: {location}
+                for logic in node_filters:
+                    location = logic.file_path
+                    if logic.line_range:
+                        location += f" (lines {logic.line_range[0]}-{logic.line_range[1]})"
+                    user_prompt += f"""- Affected Item: {logic.dataflow}
+Description: {logic.description}
+Location: {location}
 
 """
             else:
@@ -1045,51 +902,28 @@ and eventually to sink.
 
         user_prompt += "---\n\n"
 
-    user_prompt += f"""# Your Task
-
-Starting from `{path.path[0].name}` (the source), trace the data flow function by function to the sink.
-
-For each function:
-1. Read the provided source code
-2. Read additional files if you need more context
-3. With the help of the provided analysis, verify how data flows through this function and Check if any identified blocking logic is actually effective (or bypassable)
-4. Form a conclusion for this hop and proceed to the next
-
-At the end, provide your final decision in the specified format.
-
-**Remember:**
-- Do not blindly trust the provided analysis - verify it yourself
-- Blocking logic might be bypassable - think critically
-- If you need more context, read the relevant files
-"""
-
-    # Clear stream buffer and execute agent with streaming
     clear_stream()
 
     agent_result = base_claude_agent(
         cwd=target_path,
         system_prompt=_FINAL_DECISION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
-        stream_callback=stream_agent
+        stream_callback=stream_agent,
     )
 
-    # Handle agent failure
     if not agent_result.success:
         _handle_agent_failure(agent_result, "final_decision_agent")
 
     result = agent_result.result
 
-    # Parse response
     decision_str = _parse_marked_section(result, MARKER_DECISION_START, MARKER_DECISION_END)
     confidence = _parse_marked_section(result, MARKER_CONFIDENCE_START, MARKER_CONFIDENCE_END)
     summary = _parse_marked_section(result, MARKER_SUMMARY_START, MARKER_SUMMARY_END)
 
-    # Parse decision
     is_vulnerable = False
     if decision_str:
         is_vulnerable = decision_str.upper().strip() == "VULNERABLE"
 
-    # Normalize confidence
     if confidence:
         confidence = confidence.capitalize()
         if confidence not in ["High", "Medium", "Low"]:
@@ -1097,19 +931,17 @@ At the end, provide your final decision in the specified format.
     else:
         confidence = "Low"
 
-    # Handle None values
     summary = summary or "No summary provided"
 
     decision_text = "VULNERABLE" if is_vulnerable else "NOT VULNERABLE"
     update_agent("final_decision_agent", "completed", f"Decision: {decision_text} ({confidence})")
     log_success("final_decision_agent", f"Decision: {decision_text} (confidence: {confidence})")
 
-    # Log the call
     log_agent_call(
         agent_name="final_decision_agent",
         user_prompt=user_prompt,
         model_output=result,
-        parsed_result=f"(is_vulnerable={is_vulnerable}, confidence='{confidence}', summary='{summary}')"
+        parsed_result=f"(is_vulnerable={is_vulnerable}, confidence='{confidence}', summary='{summary}')",
     )
 
     return (is_vulnerable, confidence, summary)
