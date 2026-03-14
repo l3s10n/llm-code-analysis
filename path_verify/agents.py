@@ -37,7 +37,7 @@ def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
         agent_result: The failed AgentResult containing error details
         agent_name: Name of the agent that failed (for logging)
     """
-    from common.tui import stop_tui
+    from common.tui import emit_output, stop_tui
     from common.agent_logger import close_logger
     from common.base_claude_agent import create_error_file
 
@@ -49,8 +49,8 @@ def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
     error_file_path = create_error_file(agent_name, agent_result)
 
     # Print error message
-    print(f"\n[Error] Agent '{agent_name}' failed: {agent_result.error_message}")
-    print(f"[Error] Error file created at: {error_file_path}")
+    emit_output(f"[Error] Agent '{agent_name}' failed: {agent_result.error_message}", source=agent_name, level="ERROR")
+    emit_output(f"[Error] Error file created at: {error_file_path}", source=agent_name, level="ERROR")
 
     # Exit with error code
     sys.exit(1)

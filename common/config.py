@@ -28,7 +28,13 @@ def _load_config_file() -> dict:
     config_path = Path(__file__).parent.parent / "config.yaml"
 
     if not config_path.exists():
-        print(f"[Config Error] Configuration file not found: {config_path}")
+        from common.tui import emit_output
+
+        emit_output(
+            f"[Error] Configuration file not found: {config_path}",
+            source="Config",
+            level="ERROR",
+        )
         sys.exit(1)
 
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -65,7 +71,13 @@ def load_config(key: Optional[str] = None) -> Any:
         if isinstance(value, dict) and k in value:
             value = value[k]
         else:
-            print(f"[Config Error] Key not found: {key}")
+            from common.tui import emit_output
+
+            emit_output(
+                f"[Error] Key not found: {key}",
+                source="Config",
+                level="ERROR",
+            )
             sys.exit(1)
 
     return value

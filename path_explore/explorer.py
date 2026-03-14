@@ -15,6 +15,7 @@ from common.config import load_config
 from common.tui import (
     start_tui,
     stop_tui,
+    emit_output,
     log_info,
     log_success,
     log_error,
@@ -55,7 +56,14 @@ class FunctionExplorer:
     exploration to find all paths from source to potential vulnerability sinks.
     """
 
-    def __init__(self, target_path: str, target_endpoint: str, project_name: Optional[str] = None):
+    def __init__(
+        self,
+        target_path: str,
+        target_endpoint: str,
+        project_name: Optional[str] = None,
+        batch_index: int = 0,
+        batch_total: int = 0,
+    ):
         """
         Initialize the FunctionExplorer.
 
@@ -85,6 +93,8 @@ class FunctionExplorer:
 
         # Sanitize interface name for directory naming
         self.interface_name = target_endpoint.strip('/').replace('/', '_')
+        self.batch_index = batch_index
+        self.batch_total = batch_total
 
     def initialize(self) -> bool:
         """
@@ -304,7 +314,9 @@ class FunctionExplorer:
         # Start TUI directly (no banner before TUI to avoid showing after exit)
         start_tui(
             target_path=self.target_path,
-            target_endpoint=self.target_endpoint
+            target_endpoint=self.target_endpoint,
+            batch_index=self.batch_index,
+            batch_total=self.batch_total,
         )
 
         try:
@@ -372,7 +384,7 @@ class FunctionExplorer:
                 log_error("Explorer", f"Error extracting paths: {extract_error}")
                 # Continue with empty paths
 
-            log_info("Explorer", "Stopping TUI...")
+            log_info("Explorer", "Preparing exploration summary...")
 
         except Exception as e:
             import traceback
@@ -384,9 +396,7 @@ class FunctionExplorer:
             self._print_error_detail(e, traceback.format_exc())
             return []
 
-        # Stop TUI and print summary
         log_info("Explorer", "Exploration phase completed successfully")
-        stop_tui()
 
         # Append exploration result to log before closing
         if self.root:
@@ -435,24 +445,21 @@ Summary:
             append_to_log(result_content)
             log_info("Explorer", "Exploration result appended to log")
 
-        close_logger()
-        clear_error_context()
         log_info("Explorer", "Printing summary...")
         self._print_summary()
+        stop_tui()
+        close_logger()
+        clear_error_context()
         log_info("Explorer", "Exploration phase done, returning results")
         return self.vulnerability_paths
 
     def _print_error_detail(self, error: Exception, traceback_str: str) -> None:
         """Print detailed error information after TUI stops."""
-        from rich.console import Console
-        console = Console()
-        console.print()
-        console.rule("[bold red]Error Occurred[/bold red]")
-        console.print(f"[red]{type(error).__name__}[/red]: {error}")
-        console.print()
-        console.print("[dim]Traceback:[/dim]")
-        console.print(traceback_str)
-        console.rule()
+        emit_output("", source="Explorer", level="ERROR")
+        emit_output("Error Occurred", source="Explorer", level="ERROR")
+        emit_output(f"{type(error).__name__}: {error}", source="Explorer", level="ERROR")
+        emit_output("Traceback:", source="Explorer", level="ERROR")
+        emit_output(traceback_str, source="Explorer", level="ERROR")
 
     def _extract_vulnerability_paths(self) -> None:
         """
@@ -546,10 +553,7 @@ Summary:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        # Use console directly for export message (after TUI is stopped)
-        from rich.console import Console
-        console = Console()
-        console.print(f"[green]Results exported to:[/green] {output_path}")
+        emit_output(f"Results exported to: {output_path}", source="Explorer", level="SUCCESS")
 
     def get_results_json(self) -> str:
         """
@@ -569,7 +573,6 @@ Summary:
 if __name__ == '__main__':
     import argparse
     from pathlib import Path
-    from rich.console import Console
 
     parser = argparse.ArgumentParser(
         description='VulSolver - Vulnerability Path Discovery Tool',
@@ -593,7 +596,17 @@ Examples:
         help='The API endpoint to analyze (e.g., /api/readFile)'
     )
 
+    parser.add_argument(
+        '--no-tui',
+        action='store_true',
+        help='Disable the Textual UI and print progress directly to the terminal'
+    )
+
     args = parser.parse_args()
+
+    from common.tui import configure_tui
+
+    configure_tui(enabled=not args.no_tui)
 
     # Get project name from target path
     target_path = Path(args.target_path)

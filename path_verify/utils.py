@@ -7,6 +7,7 @@ import json
 import os
 from typing import List, Optional
 
+from common.tui import emit_output
 from .models import (
     PotentialPath,
     PathNode,
@@ -45,7 +46,7 @@ def print_separator(char: str = "-", length: int = 60) -> None:
         char: Character to use for the separator
         length: Length of the separator line
     """
-    print(char * length)
+    emit_output(char * length, source="Verifier")
 
 
 def print_stage_header(stage: str, path_display: str) -> None:
@@ -56,10 +57,10 @@ def print_stage_header(stage: str, path_display: str) -> None:
         stage: Name of the current stage
         path_display: Display string for the current path
     """
-    print()
+    emit_output(source="Verifier")
     print_separator("=")
-    print(f"[Stage: {stage}]")
-    print(f"Call Chain: {path_display}")
+    emit_output(f"[Stage: {stage}]", source="Verifier")
+    emit_output(f"Call Chain: {path_display}", source="Verifier")
     print_separator("=")
 
 
@@ -71,11 +72,11 @@ def print_call_chain(path: PotentialPath, highlight_index: Optional[int] = None)
         path: PotentialPath to display
         highlight_index: Index of the node to highlight (None for no highlight)
     """
-    print("\nCall Chain:")
+    emit_output("Call Chain:", source="Verifier")
     for i, node in enumerate(path.path):
         prefix = ">>> " if i == highlight_index else "    "
-        print(f"  {prefix}[{i}] {node.name} ({node.file})")
-    print(f"      -> sink: {path.sink_expression}")
+        emit_output(f"  {prefix}[{i}] {node.name} ({node.file})", source="Verifier")
+    emit_output(f"      -> sink: {path.sink_expression}", source="Verifier")
 
 
 def print_dataflow_analysis(records: List[NodeDataflowRecord]) -> None:
@@ -85,20 +86,18 @@ def print_dataflow_analysis(records: List[NodeDataflowRecord]) -> None:
     Args:
         records: List of NodeDataflowRecord to display
     """
-    print("\n[Dataflow Analysis Results]")
+    emit_output("[Dataflow Analysis Results]", source="Verifier")
     print_separator("-")
 
     for record in records:
-        print(f"\n  Node [{record.node_index}]: {record.node_name}")
+        emit_output(f"  Node [{record.node_index}]: {record.node_name}", source="Verifier")
         info = record.dataflow_info
         if info.parameters:
-            print(f"    Parameters: {', '.join(info.parameters)}")
+            emit_output(f"    Parameters: {', '.join(info.parameters)}", source="Verifier")
         if info.member_variables:
-            print(f"    Member Variables: {', '.join(info.member_variables)}")
+            emit_output(f"    Member Variables: {', '.join(info.member_variables)}", source="Verifier")
         if info.is_empty():
-            print("    (No dataflow to sink)")
-
-    print()
+            emit_output("    (No dataflow to sink)", source="Verifier")
 
 
 def print_filter_analysis(logics: List[FilterLogic]) -> None:
@@ -108,23 +107,21 @@ def print_filter_analysis(logics: List[FilterLogic]) -> None:
     Args:
         logics: List of FilterLogic to display
     """
-    print("\n[Filter Analysis Results]")
+    emit_output("[Filter Analysis Results]", source="Verifier")
     print_separator("-")
 
     if not logics:
-        print("\n  No filtering logic found that could prevent exploitation.")
+        emit_output("  No filtering logic found that could prevent exploitation.", source="Verifier")
         return
 
     for i, logic in enumerate(logics, 1):
-        print(f"\n  Filter #{i}:")
-        print(f"    Dataflow: {logic.dataflow}")
-        print(f"    Description: {logic.description}")
+        emit_output(f"  Filter #{i}:", source="Verifier")
+        emit_output(f"    Dataflow: {logic.dataflow}", source="Verifier")
+        emit_output(f"    Description: {logic.description}", source="Verifier")
         location = logic.file_path
         if logic.line_range:
             location += f":{logic.line_range[0]}-{logic.line_range[1]}"
-        print(f"    Location: {location}")
-
-    print()
+        emit_output(f"    Location: {location}", source="Verifier")
 
 
 def print_final_result(result: VerificationResult) -> None:
@@ -134,41 +131,40 @@ def print_final_result(result: VerificationResult) -> None:
     Args:
         result: VerificationResult to display
     """
-    print("\n" + "=" * 60)
-    print("[Final Verification Result]")
-    print("=" * 60)
+    emit_output("=" * 60, source="Verifier")
+    emit_output("[Final Verification Result]", source="Verifier")
+    emit_output("=" * 60, source="Verifier")
 
     # Vulnerability status
     status = "VULNERABLE" if result.is_vulnerable else "NOT VULNERABLE"
-    status_color = "\033[91m" if result.is_vulnerable else "\033[92m"
-    reset_color = "\033[0m"
-
-    print(f"\n  Status: {status_color}{status}{reset_color}")
-    print(f"  Confidence: {result.confidence}")
-    print(f"  Vulnerability Type: {result.vulnerability_type}")
-    print(f"  Sink: {result.sink_expression}")
+    emit_output(f"  Status: {status}", source="Verifier", level="SUCCESS" if result.is_vulnerable else "INFO")
+    emit_output(f"  Confidence: {result.confidence}", source="Verifier")
+    emit_output(f"  Vulnerability Type: {result.vulnerability_type}", source="Verifier")
+    emit_output(f"  Sink: {result.sink_expression}", source="Verifier")
 
     # Summary
     if result.summary:
-        print(f"\n  Summary: {result.summary}")
+        emit_output(f"  Summary: {result.summary}", source="Verifier")
 
     # Dataflow summary
     if result.dataflow_records:
-        print("\n  Dataflow Summary:")
+        emit_output("  Dataflow Summary:", source="Verifier")
         for record in result.dataflow_records:
             df = record.dataflow_info
             params = ", ".join(df.parameters) if df.parameters else "None"
             members = ", ".join(df.member_variables) if df.member_variables else "None"
-            print(f"    [{record.node_name}]: params={params}, members={members}")
+            emit_output(f"    [{record.node_name}]: params={params}, members={members}", source="Verifier")
 
     # Filters summary
     if result.filter_logics:
-        print(f"\n  Filters Found: {len(result.filter_logics)}")
+        emit_output(f"  Filters Found: {len(result.filter_logics)}", source="Verifier")
         for logic in result.filter_logics:
-            print(f"    - {logic.description[:50]}..." if len(logic.description) > 50
-                  else f"    - {logic.description}")
+            emit_output(
+                f"    - {logic.description[:50]}..." if len(logic.description) > 50 else f"    - {logic.description}",
+                source="Verifier"
+            )
 
-    print("\n" + "=" * 60)
+    emit_output("=" * 60, source="Verifier")
 
 
 def print_verification_summary(results: List[VerificationResult]) -> None:
@@ -178,17 +174,17 @@ def print_verification_summary(results: List[VerificationResult]) -> None:
     Args:
         results: List of VerificationResult to summarize
     """
-    print("\n" + "=" * 60)
-    print("[Verification Summary]")
-    print("=" * 60)
+    emit_output("=" * 60, source="Verifier")
+    emit_output("[Verification Summary]", source="Verifier")
+    emit_output("=" * 60, source="Verifier")
 
     total = len(results)
     vulnerable = sum(1 for r in results if r.is_vulnerable)
     not_vulnerable = total - vulnerable
 
-    print(f"\n  Total Paths Analyzed: {total}")
-    print(f"  Vulnerable: {vulnerable}")
-    print(f"  Not Vulnerable: {not_vulnerable}")
+    emit_output(f"  Total Paths Analyzed: {total}", source="Verifier")
+    emit_output(f"  Vulnerable: {vulnerable}", source="Verifier")
+    emit_output(f"  Not Vulnerable: {not_vulnerable}", source="Verifier")
 
     # Breakdown by type
     path_traversal = sum(1 for r in results if r.vulnerability_type == "PathTraversal")
@@ -197,25 +193,24 @@ def print_verification_summary(results: List[VerificationResult]) -> None:
     sql_injection = sum(1 for r in results if r.vulnerability_type == "SQLInjection")
     ssrf = sum(1 for r in results if r.vulnerability_type == "SSRF")
 
-    print(f"\n  By Vulnerability Type:")
-    print(f"    Path Traversal: {path_traversal}")
-    print(f"    Command Injection: {command_injection}")
-    print(f"    Code Injection: {code_injection}")
-    print(f"    SQL Injection: {sql_injection}")
-    print(f"    SSRF: {ssrf}")
+    emit_output("  By Vulnerability Type:", source="Verifier")
+    emit_output(f"    Path Traversal: {path_traversal}", source="Verifier")
+    emit_output(f"    Command Injection: {command_injection}", source="Verifier")
+    emit_output(f"    Code Injection: {code_injection}", source="Verifier")
+    emit_output(f"    SQL Injection: {sql_injection}", source="Verifier")
+    emit_output(f"    SSRF: {ssrf}", source="Verifier")
 
     # List vulnerable paths
     if vulnerable > 0:
-        print("\n  Vulnerable Paths:")
+        emit_output("  Vulnerable Paths:", source="Verifier")
         for r in results:
             if r.is_vulnerable:
                 # Build call chain display from path
                 names = [node.name for node in r.path]
                 names.append("sink")
                 call_chain = " -> ".join(names)
-                print(f"    - {call_chain} ({r.vulnerability_type})")
-
-    print("\n" + "=" * 60)
+                emit_output(f"    - {call_chain} ({r.vulnerability_type})", source="Verifier")
+    emit_output("=" * 60, source="Verifier")
 
 
 def get_short_filename(file_path: str) -> str:

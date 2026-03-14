@@ -16,6 +16,7 @@ from common.tui import (
     TUIMode,
     start_tui,
     stop_tui,
+    emit_output,
     log_info,
     log_success,
     log_error,
@@ -64,7 +65,9 @@ class PathVerifier:
         self,
         target_path: str,
         potential_paths_file: str,
-        project_name: Optional[str] = None
+        project_name: Optional[str] = None,
+        batch_index: int = 0,
+        batch_total: int = 0,
     ):
         """
         Initialize the PathVerifier.
@@ -96,6 +99,8 @@ class PathVerifier:
 
         # Interface name will be set after loading potential paths
         self.interface_name: Optional[str] = None
+        self.batch_index = batch_index
+        self.batch_total = batch_total
 
     def load_paths(self) -> bool:
         """
@@ -154,7 +159,13 @@ class PathVerifier:
         # Update TUI with current path info
         call_chain_names = [node.name for node in path.path]
         call_chain_files = [node.file for node in path.path]
-        set_verify_path_info(path_index, total_paths, call_chain_names, call_chain_files)
+        set_verify_path_info(
+            path_index,
+            total_paths,
+            call_chain_names,
+            call_chain_files,
+            path.sink_expression,
+        )
 
         print_stage_header("Path Verification", call_chain_display)
         print_call_chain(path)
@@ -372,11 +383,11 @@ Not Vulnerable: {self.not_vulnerable_count}
         # Load potential paths if not already loaded
         if not self.potential_paths:
             if not self.load_paths():
-                print("[Error] Failed to load potential paths")
+                emit_output("[Error] Failed to load potential paths", source="Verifier", level="ERROR")
                 return []
 
             if not self.potential_paths:
-                print("[Warning] No potential paths to verify")
+                emit_output("[Warning] No potential paths to verify", source="Verifier", level="WARNING")
                 return []
 
         # Now initialize logger with interface_name from endpoint
@@ -399,8 +410,10 @@ Not Vulnerable: {self.not_vulnerable_count}
         # Start TUI in verify mode
         start_tui(
             target_path=self.target_path,
-            target_endpoint=self.potential_paths_file,
-            mode=TUIMode.VERIFY
+            target_endpoint=self.potential_paths[0].interface_name,
+            mode=TUIMode.VERIFY,
+            batch_index=self.batch_index,
+            batch_total=self.batch_total,
         )
 
         try:
@@ -430,20 +443,18 @@ Not Vulnerable: {self.not_vulnerable_count}
             stop_tui()
             close_logger()
             clear_error_context()
-            print("\n[Error Details]")
-            print(traceback.format_exc())
+            emit_output("[Error Details]", source="Verifier", level="ERROR")
+            emit_output(traceback.format_exc(), source="Verifier", level="ERROR")
             return []
-
-        # Stop TUI and print summary
-        stop_tui()
 
         # Write final summary to log
         summary_content = self._format_final_summary()
         append_to_log(summary_content)
 
+        print_verify_summary(self.vulnerable_count, self.not_vulnerable_count, len(self.verification_results))
+        stop_tui()
         close_logger()
         clear_error_context()
-        print_verify_summary(self.vulnerable_count, self.not_vulnerable_count, len(self.verification_results))
         return self.verification_results
 
     def export_results(self, output_path: str) -> None:
@@ -461,9 +472,7 @@ Not Vulnerable: {self.not_vulnerable_count}
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        from rich.console import Console
-        console = Console()
-        console.print(f"[green]Verification results exported to:[/green] {output_path}")
+        emit_output(f"Verification results exported to: {output_path}", source="Verifier", level="SUCCESS")
 
     def get_results_json(self) -> str:
         """
@@ -483,7 +492,6 @@ Not Vulnerable: {self.not_vulnerable_count}
 if __name__ == '__main__':
     import argparse
     from pathlib import Path
-    from rich.console import Console
 
     parser = argparse.ArgumentParser(
         description='VulSolver - Vulnerability Path Verification Tool',
@@ -514,7 +522,17 @@ Examples:
         help='Output file path for verification results (default: auto-generated)'
     )
 
+    parser.add_argument(
+        '--no-tui',
+        action='store_true',
+        help='Disable the Textual UI and print progress directly to the terminal'
+    )
+
     args = parser.parse_args()
+
+    from common.tui import configure_tui
+
+    configure_tui(enabled=not args.no_tui)
 
     # Get project name from target path
     target_path = Path(args.target_path)
@@ -529,7 +547,7 @@ Examples:
 
     # Load paths first to get interface_name for determining output path
     if not verifier.load_paths():
-        print("[Error] Failed to load potential paths")
+        emit_output("[Error] Failed to load potential paths", source="Verifier", level="ERROR")
         sys.exit(1)
 
     # Build output path if not specified
