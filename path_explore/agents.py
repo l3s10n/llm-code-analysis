@@ -513,7 +513,8 @@ A sink node must satisfy all of the following:
    - SQL query execution
    - outbound HTTP request / URL request
 4. Functions that only construct, transform, validate, normalize, parse, or inspect the file path, command, code, SQL, or request target are not sink nodes unless they directly execute one of the sink operations listed above.
-5. The file path, command, code, SQL, or request target is not a compile-time constant. For SQL execution, exclude queries whose structure is fixed and whose inputs are supplied only through parameter binding or precompiled placeholders (for example, prepared statements or MyBatis `#{}`).
+5. The file path, command, code, SQL, or request target is not a compile-time constant. 
+6. For SQL execution, **exclude queries whose structure is fixed and whose inputs are supplied only through parameter binding or precompiled placeholders** (for example, prepared statements or MyBatis `#{}`).
 
 # Interest Node Definition
 
