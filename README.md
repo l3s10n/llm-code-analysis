@@ -17,7 +17,7 @@ Experiments demonstrate the exceptional performance of VulSolver in identifying 
 
 VulSolver currently supports detection of Path Traversal, Command Injection, Code Injection, SQL Injection, and SSRF vulnerabilities, with ongoing development to expand coverage for additional vulnerability types.
 
-Through testing on widely-used open-source projects (with star counts ranging from 1.4k to 38.2k), VulSolver has demonstrated its effectiveness in vulnerability analysis on large real-world codebases. As of April 3, 2026, VulSolver has discovered 38 zero-day vulnerabilities, most of which were found after recent architectural optimizations to the project. Their CVE IDs are currently being requested and will be added later. Some previously discovered CVEs are listed below:
+Through testing on widely-used open-source projects (with star counts ranging from 1.4k to 38.2k), VulSolver has demonstrated its effectiveness in vulnerability analysis on large real-world codebases. As of April 16, 2026, VulSolver has discovered 40+ zero-day vulnerabilities, most of which were found after recent architectural optimizations to the project. Their CVE IDs are currently being requested and will be added later. Some previously discovered CVEs are listed below:
 
 - CVE-2025-50745
 - CVE-2025-5384
