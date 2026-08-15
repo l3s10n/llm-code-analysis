@@ -411,7 +411,8 @@ def base_claude_agent(
     base_url: str = DEFAULT_URL,
     api_key: str = DEFAULT_API_KEY,
     stream_callback: Optional[Callable[[str], None]] = None,
-    use_cache: bool = True
+    use_cache: bool = True,
+    result_validator: Optional[Callable[[str], tuple[bool, str]]] = None,
 ) -> AgentResult:
     """
     Execute a Claude agent with retry logic and timeout handling.
@@ -433,6 +434,9 @@ def base_claude_agent(
         stream_callback: Optional callback function for streaming output.
                         Called with each text chunk as it arrives.
         use_cache: Whether to use caching. Defaults to True.
+        result_validator: Optional structural validator for non-empty output.
+                         It returns ``(is_valid, error_message)``. Invalid
+                         output is not cached and is retried without cache.
 
     Returns:
         AgentResult: Contains result string (or None if failed), success status,
@@ -474,19 +478,43 @@ def base_claude_agent(
             )
             elapsed_time = time.time() - start_time
 
-            # Check if result is valid (not None and has meaningful content)
+            # Check the result before caching it. All invalid-result branches
+            # continue to another attempt or fall through to the common
+            # failure return after the final attempt.
+            validation_error = None
             if result is None:
                 last_error_type = "empty_result"
                 last_error_message = "Agent returned None"
                 last_result = None
-                if attempt < max_retries:
-                    continue
+                validation_error = last_error_message
             elif len(result) < 10:
                 last_error_type = "empty_result"
                 last_error_message = f"Agent returned result with only {len(result)} characters (minimum 10 required)"
                 last_result = result
+                validation_error = last_error_message
+            elif result_validator is not None:
+                try:
+                    is_valid, validator_message = result_validator(result)
+                except Exception as e:
+                    is_valid = False
+                    validator_message = (
+                        f"Result validator raised {type(e).__name__}: {e}"
+                    )
+                if not is_valid:
+                    last_error_type = "invalid_result_format"
+                    last_error_message = validator_message or "Result validation failed"
+                    last_result = result
+                    validation_error = last_error_message
+
+            if validation_error is not None:
                 if attempt < max_retries:
+                    if stream_callback is not None:
+                        stream_callback(
+                            "\n[Agent] Invalid result; retrying without cache "
+                            f"({attempt + 1}/{max_retries}): {validation_error}\n"
+                        )
                     continue
+                break
 
             # Success - save to cache if caching is enabled, then return the result
             if use_cache:

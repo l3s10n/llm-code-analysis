@@ -7,7 +7,7 @@ Each agent performs a specialized analysis task and returns structured results.
 
 import re
 import sys
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 from common.agent_logger import log_agent_call
 from common.base_claude_agent import AgentResult, base_claude_agent
@@ -22,7 +22,7 @@ from .utils import read_source_code_by_range
 # Helper Functions
 # =============================================================================
 
-def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> None:
+def _handle_agent_failure(agent_result: AgentResult, agent_name: str) -> NoReturn:
     """
     Handle agent execution failure by printing error and exiting.
 
@@ -112,6 +112,29 @@ def _parse_marked_section(text: str, start_marker: str, end_marker: str) -> Opti
     pattern = rf"{re.escape(start_marker)}\n(.*?)\n{re.escape(end_marker)}"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1).strip() if match else None
+
+
+def _validate_final_decision_output(result: str) -> tuple[bool, str]:
+    """Validate the structured sections consumed by final_decision_agent."""
+    decision = _parse_marked_section(
+        result, MARKER_DECISION_START, MARKER_DECISION_END
+    )
+    confidence = _parse_marked_section(
+        result, MARKER_CONFIDENCE_START, MARKER_CONFIDENCE_END
+    )
+    summary = _parse_marked_section(result, MARKER_SUMMARY_START, MARKER_SUMMARY_END)
+
+    if decision is None:
+        return False, "missing or malformed decision markers"
+    if decision.strip().upper() not in {"VULNERABLE", "NOT VULNERABLE"}:
+        return False, f"invalid decision value: {decision!r}"
+    if confidence is None:
+        return False, "missing or malformed confidence markers"
+    if confidence.strip().capitalize() not in {"High", "Medium", "Low"}:
+        return False, f"invalid confidence value: {confidence!r}"
+    if summary is None or not summary.strip():
+        return False, "missing, malformed, or empty summary markers"
+    return True, ""
 
 
 def _parse_list_section(text: str, start_marker: str, end_marker: str) -> List[str]:
@@ -949,6 +972,7 @@ Location: {location}
         base_url=base_url,
         api_key=api_key,
         stream_callback=stream_agent,
+        result_validator=_validate_final_decision_output,
     )
 
     if not agent_result.success:
@@ -960,18 +984,22 @@ Location: {location}
     confidence = _parse_marked_section(result, MARKER_CONFIDENCE_START, MARKER_CONFIDENCE_END)
     summary = _parse_marked_section(result, MARKER_SUMMARY_START, MARKER_SUMMARY_END)
 
-    is_vulnerable = False
-    if decision_str:
-        is_vulnerable = decision_str.upper().strip() == "VULNERABLE"
+    # These sections have already passed _validate_final_decision_output in
+    # base_claude_agent. Parsing failure is therefore an execution failure,
+    # never an implicit NOT VULNERABLE decision.
+    if decision_str is None or confidence is None or summary is None:
+        _handle_agent_failure(
+            AgentResult(
+                result=None,
+                success=False,
+                error_type="invalid_result_format",
+                error_message="Validated final-decision output could not be parsed",
+            ),
+            "final_decision_agent",
+        )
 
-    if confidence:
-        confidence = confidence.capitalize()
-        if confidence not in ["High", "Medium", "Low"]:
-            confidence = "Low"
-    else:
-        confidence = "Low"
-
-    summary = summary or "No summary provided"
+    is_vulnerable = decision_str.upper().strip() == "VULNERABLE"
+    confidence = confidence.capitalize()
 
     decision_text = "VULNERABLE" if is_vulnerable else "NOT VULNERABLE"
     update_agent("final_decision_agent", "completed", f"Decision: {decision_text} ({confidence})")

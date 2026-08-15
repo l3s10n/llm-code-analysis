@@ -1,9 +1,11 @@
 """
 Configuration module for VulSolver.
 
-Reads config.yaml from project root and provides key access via dot notation.
+Reads the project config.yaml by default, or the path selected through the
+GOLD_MINER_CONFIG environment variable, and provides dot-notation key access.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -22,10 +24,20 @@ OPTIONAL_CONFIG_KEYS = {
     "decision_llm.model",
 }
 
+CONFIG_ENV_VAR = "GOLD_MINER_CONFIG"
+
+
+def get_config_path() -> Path:
+    """Return the effective configuration file path."""
+    configured_path = os.environ.get(CONFIG_ENV_VAR)
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+    return Path(__file__).parent.parent / "config.yaml"
+
 
 def _load_config_file() -> dict:
     """
-    Load config.yaml from project root.
+    Load the effective configuration file.
 
     Returns:
         dict: Parsed configuration dictionary.
@@ -33,7 +45,7 @@ def _load_config_file() -> dict:
     Raises:
         SystemExit: If configuration file is not found.
     """
-    config_path = Path(__file__).parent.parent / "config.yaml"
+    config_path = get_config_path()
 
     if not config_path.exists():
         from common.tui import emit_output
