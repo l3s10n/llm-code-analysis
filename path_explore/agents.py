@@ -564,6 +564,7 @@ If there are multiple sink nodes, output multiple `--- sink info start ---` bloc
 If there are multiple interest nodes, output multiple `--- interest info start ---` blocks.
 If there are no sink nodes, do not output any `--- sink info start ---` block.
 If there are no interest nodes, do not output any `--- interest info start ---` block.
+If there are any sink or interest nodes, they MUST be included in the corresponding blocks; prose-only findings are invalid.
 
 # Restrictions
 
