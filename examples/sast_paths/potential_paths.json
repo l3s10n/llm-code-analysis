@@ -1,0 +1,21 @@
+[
+  {
+    "InterfaceName": "/example/read",
+    "Type": "PathTraversal",
+    "SinkExpression": "Files.readString(Path.of(fileName))",
+    "Path": [
+      {
+        "file_path": "ExampleController.java",
+        "function_name": "read",
+        "start_line": 7,
+        "end_line": 9
+      },
+      {
+        "file_path": "ExampleController.java",
+        "function_name": "readFile",
+        "start_line": 11,
+        "end_line": 13
+      }
+    ]
+  }
+]

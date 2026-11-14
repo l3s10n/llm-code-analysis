@@ -60,13 +60,15 @@ decision_llm:
 
 # 使用
 
-VulSolver 以接口（HTTP 接口、RPC 接口等入口）为维度深入分析代码，通过以下简单的命令即可对项目的接口做深入分析：
+以下命令均从 VulSolver 仓库根目录执行。结果、日志和缓存文件的路径相对于当前工作目录。
+
+如果已有 SAST 生成的候选路径，可直接使用下文的[独立路径验证入口](#与-sast-结合使用)；路径中已经记录入口，不需要额外指定接口参数。若希望使用内置的 `path_explore` 模块从指定接口发现路径，再验证这些路径，则运行：
 
 ```bash
 python3 main.py <待分析项目根目录> <待分析项目接口名> # 例如：python3 main.py '/tmp/helloProject' '/sample/hello'
 ```
 
-如果你希望一次分析多个接口，可以通过 `--interface-file` 提供一个接口列表文件，文件中每行一个接口：
+如果希望一次分析多个接口，可以通过 `--interface-file` 提供一个接口列表文件，每行一个接口。空行和以 `#` 开头的行会被忽略，接口按文件中的顺序处理：
 
 ```bash
 python3 main.py <待分析项目根目录> --interface-file <接口列表文件>
@@ -100,74 +102,49 @@ python3 main.py <待分析项目根目录> --interface-file <接口列表文件>
 
 # 结果详情查阅
 
-VulSolver 执行结束后，你可以在 VulSolver 根目录下的 `results/<项目名>/<接口名>` 看到名为 `potential_paths.json` 与 `verified_paths.json` 的结果文件。前者详细记录了从给定接口出发潜在的漏洞调用链条，后者详细记录了调用链条是否存在漏洞、以及其中导致漏洞无法利用的逻辑的位置等。具体而言，两个文件的内容如下：
+结果保存在相对于工作目录的 `results/<项目名>/<接口名>/` 下。构造目录名时，接口名首尾的 `/` 会被去掉，其余 `/` 会替换为 `_`，例如 `/example/read` 对应 `example_read`。
 
-potential_paths.json:
-
-```json
-[
-  {
-    "InterfaceName": <分析的接口名称>,
-    "Type": <漏洞类型>,
-    "SinkExpression": <sink的表达式>,
-    "Path": [
-      {
-        "file": <该函数节点所在文件>,
-        "name": <该函数节点名称>,
-        "source_code": <该函数节点源码>
-      },
-      <调用链路上其他节点信息，格式同上>
-    ]
-  },
-  <其他调用链路信息，格式同上>
-]
-```
-
-verified_paths.json:
+`potential_paths.json` 记录候选调用链。每个 `Path` 节点使用相对于目标项目根目录的 `file_path`、`function_name`，以及**从 1 开始、包含首尾两行**的 `start_line` 和 `end_line`。节点按入口方法到调用 sink 的方法排序，sink 表达式单独放在 `SinkExpression` 中。验证器从目标代码中按这些位置读取源码。以下示例同时提供了[JSON 文件及对应的 Java 源码](examples/sast_paths/potential_paths.json)：
 
 ```json
 [
   {
-    "InterfaceName": <分析的接口名称>,
-    "Type": <漏洞类型>,
-    "SinkExpression": <sink的表达式>,
+    "InterfaceName": "/example/read",
+    "Type": "PathTraversal",
+    "SinkExpression": "Files.readString(Path.of(fileName))",
     "Path": [
       {
-        "file": <该函数节点所在文件>,
-        "name": <该函数节点名称>,
-        "source_code": <该函数节点源码>
+        "file_path": "ExampleController.java",
+        "function_name": "read",
+        "start_line": 7,
+        "end_line": 9
       },
-      <调用链路上其他节点信息，格式同上>
-    ],
-    "IsVulnerable": <是否存在漏洞>,
-    "Confidence": <置信度>,
-    "Summary": <分析总结>,
-    "DataflowAnalysis": [
       {
-        "NodeIndex": 0,
-        "NodeName": <该函数节点名称>,
-        "Parameters": <当前函数中，所有最终流向 sink 的参数列表>,
-        "MemberVariables": <当前函数中，所有最终流向 sink 的成员变量列表>
-      },
-      <其他函数节点的数据流信息>
-    ],
-    "FilterLogics": [
-      {
-        "Dataflow": <发生在什么数据流传递过程中>,
-        "Description": <该逻辑的描述>,
-        "File": <该逻辑所在文件>,
-        "Lines": <该逻辑所在行>
-      },
-      <其他导致漏洞无法利用的逻辑>
+        "file_path": "ExampleController.java",
+        "function_name": "readFile",
+        "start_line": 11,
+        "end_line": 13
+      }
     ]
-  },
-  <其他调用链路分析结果信息，格式同上>
+  }
 ]
 ```
+
+`verified_paths.json` 保留 `InterfaceName`、`Type`、`SinkExpression` 和同样的 `Path` 位置信息，并增加以下字段：
+
+| 字段 | 内容 |
+| :--- | :--- |
+| `IsVulnerable` | 当前候选路径的可利用性布尔判断。 |
+| `Confidence` | 决策阶段返回的置信度标签。 |
+| `Summary` | 判断结果的解释。 |
+| `DataflowAnalysis` | 每条记录包含 `NodeIndex`（从 0 开始）、`NodeName`、`Parameters`、`MemberVariables` 和 `NonLocalSources`。最后一项记录影响 sink 关键语义的非局部数据读取描述。 |
+| `FilterLogics` | 每条记录包含 `Dataflow`（受影响的调用者侧数据项）、`Description`、`File` 和 `Lines`（如 `10-20`，无法确定时为 `Unknown`）。 |
+
+探索阶段发现候选路径时写入 `potential_paths.json`，验证阶段产生结果时写入 `verified_paths.json`。独立验证入口读取已有候选路径文件，不会重新生成候选文件。
 
 # 日志详情查阅
 
-VulSolver 执行结束后，你可以在 VulSolver 根目录下的 `logs/<项目名>/<接口名>` 看到名为 `path_explore.log` 与 `path_verify.log` 的日志文件。两者详细记录了 VulSolver 的分析过程。其中 `path_explore.log` 包含详细的接口探索过程，其结尾会展示该接口的探索树，记录了从该接口到若干 sink 的路径，例如：
+日志保存在相对于工作目录的 `logs/<项目名>/<接口名>/` 下。执行探索阶段时，`path_explore.log` 记录接口探索过程；`path_verify.log` 记录路径验证过程。探索日志末尾会展示从接口到 sink 的路径树，例如：
 
 ```
 <VulSolver 探索调用树的过程>
@@ -195,10 +172,18 @@ Path Nodes:
 
 # 与 SAST 结合使用
 
-VulSolver 总体上分为两个模块 —— `path_explore` 与 `path_verify`，前者用于发现调用链路，后者用于验证调用链路。如果你认为某些 SAST 的漏洞发现能力较强，但是误报较高，可以将 SAST 与 VulSolver 结合使用，用 SAST 替代 `path_explore` 模块，使用 `path_verify` 进一步验证 SAST 的告警。
+VulSolver 将候选路径构建与可利用性分析分开：SAST 前端根据调用图及 source/sink 规则提供候选调用链，`path_verify` 模块通过 LLM 语义分析判断这些路径的可利用性，不要求或采用前端给出的可利用性判断。内置的 `path_explore` 模块也可以提供候选路径。
 
-你需要做的是将 SAST 的告警按照上文 `potential_paths.json` 的格式维护起来，然后执行如下命令即可使用 VulSolver 对路径做验证：
+将 SAST 候选路径导出为上文的 `potential_paths.json` 格式，源码位置必须对应同一份目标代码。不同 `InterfaceName` 的路径应分别存入不同文件，因为验证器使用第一条路径的接口名命名本次运行的结果和日志目录。随后运行：
 
 ```bash
-python3 -m path_verify.verify <待分析项目的代码根目录> <上文 potential_paths.json 的文件路径>
+python3 -m path_verify.verify <待分析项目的代码根目录> <potential_paths.json 的文件路径> --no-tui
 ```
+
+配置好模型后，可以直接运行仓库中的合成示例：
+
+```bash
+python3 -m path_verify.verify ./examples/sast_paths ./examples/sast_paths/potential_paths.json --no-tui
+```
+
+该示例直接导入候选路径并读取匹配的 Java 源码，不调用 `path_explore`，也不需要启动 Java 应用；验证仍然需要调用配置的 LLM。可通过包含目录部分的路径指定输出文件，例如 `-o ./results/example_verified.json`；去掉 `--no-tui` 则使用 Textual 界面。
