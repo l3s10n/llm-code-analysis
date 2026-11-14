@@ -2,22 +2,24 @@ English | [中文](./README_CN.md)
 
 # VulSolver
 
-Large Language Models (LLMs) are being explored for vulnerability discovery because of their ability to understand code semantics—a capability lacking in traditional Static Application Security Testing (SAST) tools. A typical approach centers on constructing LLM-based agents, where the LLM acts as a brain, orchestrating tools and knowledge to identify vulnerabilities. However, this paradigm suffers from critical instability and inaccuracy due to LLMs' unpredictable outputs and severely degraded accuracy when processing large codebases. Certain approaches are SAST-centric, using LLMs to generate rules or validate alerts. While these approaches are more stable, they remain confined by SAST's inherent limitations and cannot fully leverage LLMs' semantic comprehension.
+VulSolver is an LLM-based framework for repository-scale vulnerability detection through stepwise constraint solving. It distinguishes potentially dangerous source-to-sink call paths from paths whose checks, transformations, or application logic prevent exploitation.
 
-Inspired by how human experts conduct security audits, we introduce VulSolver—a novel paradigm for LLM-driven vulnerability detection that differs from all existing approaches. VulSolver incrementally builds and actively reuses verified security conclusions during analysis through a controlled process. This frees the LLM from repeatedly re-examining or memorizing previous code while maintaining full contextual awareness, leading to a dramatic increase in both stability and accuracy.
+Along each candidate path, VulSolver analyzes caller–callee hops, accounts for relevant off-path methods, and propagates a compact state of vulnerability-relevant data. The maintained state and supporting evidence are used to assess reachability and sink exploitability without repeatedly supplying the entire call chain.
 
-Experiments demonstrate the exceptional performance of VulSolver in identifying vulnerabilities across multiple metrics. Specifically, VulSolver achieves the following results on the OWASP Benchmark (https://github.com/OWASP-Benchmark/BenchmarkJava) on Path Traversal, Command Injection, and SQL Injection vulnerabilities (1,023 test cases in total):
+The paper evaluates VulSolver on 1,023 [OWASP Benchmark](https://github.com/OWASP-Benchmark/BenchmarkJava) cases covering command injection, path traversal, and SQL injection, using six LLM backbones: GLM-4.7, Kimi-K2, DeepSeek-V3, DeepSeek-V4-Pro, GPT-4o, and GPT-4-Turbo. The table below reports **DeepSeek-V4-Pro**, the best-performing backbone overall. All rows use this same backbone, and all metrics, including F1, are percentages.
 
 | Vulnerability Type | Accuracy | Precision | Recall | F1-Score |
 | :--- | :--- | :--- | :--- | :--- |
-| Overall | 99.12% | 99.81% | 98.49% | 0.9915 |
-| Command Injection | 98.41% | 100.00% | 96.83% | 0.9839 |
-| Path Traversal | 98.88% | 100.00% | 97.74% | 0.9886 |
-| SQL Injection | 99.60% | 99.63% | 99.63% | 0.9963 |
+| Overall | 99.41% | 100.00% | 98.87% | 99.43% |
+| Command Injection | 99.20% | 100.00% | 98.41% | 99.20% |
+| Path Traversal | 99.63% | 100.00% | 99.25% | 99.62% |
+| SQL Injection | 99.40% | 100.00% | 98.90% | 99.45% |
 
-VulSolver currently supports detection of Path Traversal, Command Injection, Code Injection, SQL Injection, and SSRF vulnerabilities, with ongoing development to expand coverage for additional vulnerability types.
+The paper uses Kimi-K2 consistently for baseline comparisons and follow-up experiments unless otherwise specified; its overall benchmark F1 is 97.97%, with 100% recall. The best backbone can vary by vulnerability type: GLM-4.7 achieves the highest SQL injection F1 of 99.63%. These are separate configurations, not results combined into the table above.
 
-Through testing on widely-used open-source projects (with star counts ranging from 1.4k to 38.2k), VulSolver has demonstrated its effectiveness in vulnerability analysis on large real-world codebases. As of April 16, 2026, VulSolver has discovered 40+ zero-day vulnerabilities, most of which were found after recent architectural optimizations to the project. Their CVE IDs are currently being requested and will be added later. Some previously discovered CVEs are listed below:
+VulSolver currently supports detection of Path Traversal, Command Injection, Code Injection, SQL Injection, and SSRF vulnerabilities. The controlled benchmark above covers command injection, path traversal, and SQL injection; it does not report benchmark scores for code injection or SSRF.
+
+In the paper's real-world study, VulSolver analyzed ten widely used open-source projects (with star counts ranging from 1.4k to 38.2k at the time of measurement) and discovered **40+ vulnerabilities**. Selected CVE identifiers from earlier disclosures are listed below; this is not a complete inventory of the study's findings.
 
 - CVE-2025-50745
 - CVE-2025-5384
@@ -28,7 +30,7 @@ Through testing on widely-used open-source projects (with star counts ranging fr
 - CVE-2025-5389
 - CVE-2025-5390
 
-Note: All vulnerabilities were 100% discovered by our LLM-based project with no human assistance. They were found while still zero-day, though some CVE IDs were assigned to other parties due to concurrent duplicate submissions.
+Discovery is automated. Reported findings are subsequently confirmed through manual code review, proof-of-concept validation in a test environment, and confirmation by the affected projects' maintainers. The number of valid alerts measures alert precision, not the fraction of all vulnerabilities discovered in a repository. Some CVE identifiers were assigned to other parties following concurrent duplicate reports.
 
 # Installation and Configuration
 
