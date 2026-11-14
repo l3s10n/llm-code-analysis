@@ -182,6 +182,7 @@ class TextualFrontendController:
 
     def snapshot(self) -> FrontendState:
         with self._lock:
+            # asdict copies nested lists, keeping snapshot edits out of shared state.
             return FrontendState(**asdict(self._state))
 
     def emit_output(self, text: str, source: str = "Console", level: str = "INFO") -> None:
@@ -331,6 +332,7 @@ class TextualFrontendController:
         if self._state_file is None:
             return
         payload = asdict(self._state)
+        # Replace a complete file so the frontend never observes partially written JSON.
         temp_path = self._state_file.with_suffix(".tmp")
         with open(temp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)

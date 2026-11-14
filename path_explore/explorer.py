@@ -234,6 +234,7 @@ class FunctionExplorer:
             log_success("Explorer", f"Added sink node: {tag.value}: {sink_info.sink_expression}")
 
         filtered_count = 0
+        # Check only this ancestry so separate branches can reuse the same method.
         for info in interest_infos:
             if is_node_in_interest_chain(info, call_chain_infos):
                 log_warning(
@@ -280,6 +281,7 @@ class FunctionExplorer:
         prune_from = node
         found_multi_branch_parent = False
 
+        # Remove the dead suffix without discarding sibling branches.
         while current.parent is not None:
             parent = current.parent
             if len(parent.children) > 1:

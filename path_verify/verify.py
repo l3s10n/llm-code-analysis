@@ -221,6 +221,7 @@ class PathVerifier:
                 current_dataflow=x_dataflow,
             )
 
+            # Retain earlier hops' evidence for the final path-level decision.
             all_filter_logics.extend(filter_logics)
 
         # Clear node highlighting after filter phase
@@ -317,6 +318,7 @@ Path Nodes:
         record_map = {record.node_index: record for record in records}
         normalized_records = []
 
+        # Preserve positional indexing even when the agent omits a node's record.
         for i, node in enumerate(path.path):
             record = record_map.get(i)
             if record is None:
