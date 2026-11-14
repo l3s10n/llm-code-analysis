@@ -12,6 +12,8 @@ python3 -m unittest discover -s tests -t . -v
 
 The suite creates temporary placeholder configuration and blocks SDK model requests. It never reads your local model credentials or makes LLM calls. It covers candidate interchange, source ranges, branch traversal, validation retries, model-cache isolation, and frontend state isolation. These are regression checks for software contracts, not a reproduction of the paper's detection results.
 
+The [Offline checks workflow](https://github.com/l3s10n/llm-code-analysis/actions/workflows/offline-checks.yml) runs the suite and syntax checks on Python 3.11 and 3.12 for pushes and pull requests to `main`. It can also be started manually. No model secrets are configured in the workflow.
+
 Check Python syntax without importing the agent modules or contacting a model:
 
 ```bash

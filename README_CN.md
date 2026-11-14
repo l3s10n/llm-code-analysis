@@ -2,6 +2,8 @@
 
 # VulSolver
 
+[![离线检查](https://github.com/l3s10n/llm-code-analysis/actions/workflows/offline-checks.yml/badge.svg)](https://github.com/l3s10n/llm-code-analysis/actions/workflows/offline-checks.yml)
+
 VulSolver 是一个通过逐步约束求解实现仓库级漏洞检测的 LLM 框架。它分析潜在的 source-to-sink 调用路径，区分可利用的路径与受到检查、数据变换或业务逻辑阻断的路径。
 
 VulSolver 沿候选路径逐跳分析调用者与被调用者，考虑相关旁支方法的影响，并传播漏洞相关数据的紧凑状态。维护的状态及支持证据用于判断路径可达性和 sink 可利用性，避免在每一步反复提供整条调用链。
@@ -190,4 +192,4 @@ python3 -m path_verify.verify ./examples/sast_paths ./examples/sast_paths/potent
 
 # 开发说明
 
-离线检查方法以及配置、缓存和重试行为见[开发说明](docs/DEVELOPMENT.md)。
+离线回归测试方法以及配置、缓存和重试行为见[开发说明](docs/DEVELOPMENT.md)。向 `main` 推送或发起合并请求时，GitHub Actions 会在 Python 3.11 和 3.12 上执行这些检查；上方徽章展示实际运行状态。测试使用临时占位配置并阻断模型请求，不需要 API 凭据。

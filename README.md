@@ -2,6 +2,8 @@ English | [中文](./README_CN.md)
 
 # VulSolver
 
+[![Offline checks](https://github.com/l3s10n/llm-code-analysis/actions/workflows/offline-checks.yml/badge.svg)](https://github.com/l3s10n/llm-code-analysis/actions/workflows/offline-checks.yml)
+
 VulSolver is an LLM-based framework for repository-scale vulnerability detection through stepwise constraint solving. It distinguishes potentially dangerous source-to-sink call paths from paths whose checks, transformations, or application logic prevent exploitation.
 
 Along each candidate path, VulSolver analyzes caller–callee hops, accounts for relevant off-path methods, and propagates a compact state of vulnerability-relevant data. The maintained state and supporting evidence are used to assess reachability and sink exploitability without repeatedly supplying the entire call chain.
@@ -190,4 +192,4 @@ It imports the candidate path and reads the matching Java source directly, witho
 
 # Development
 
-See the [development notes](docs/DEVELOPMENT.md) for offline checks and configuration, cache, and retry behavior.
+See the [development notes](docs/DEVELOPMENT.md) for offline regression tests and configuration, cache, and retry behavior. GitHub Actions runs these checks on Python 3.11 and 3.12 for pushes and pull requests to `main`; the badge above shows the live workflow status. Tests use temporary placeholder configuration and block model requests, so no API credentials are required.
