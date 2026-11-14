@@ -4,6 +4,14 @@ Run commands from the repository root after installing `requirements.txt`.
 
 ## Offline checks
 
+The public regression suite requires Python 3.11 or later. Run it with:
+
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+The suite creates temporary placeholder configuration and blocks SDK model requests. It never reads your local model credentials or makes LLM calls. It covers candidate interchange, source ranges, branch traversal, validation retries, model-cache isolation, and frontend state isolation. These are regression checks for software contracts, not a reproduction of the paper's detection results.
+
 Check Python syntax without importing the agent modules or contacting a model:
 
 ```bash
