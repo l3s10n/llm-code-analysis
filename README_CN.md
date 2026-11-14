@@ -54,7 +54,7 @@ decision_llm:
   model: "复杂决策模型名称"
 ```
 
-`decision_llm` 是可选配置，仅用于复杂逻辑决策时调用。如果将其留空，VulSolver 会统一使用 `llm` 配置。
+`decision_llm` 是可选配置，三个字段全部填写时用于最终可利用性判断，否则该阶段回退到 `llm`。保持未配置即可让整个分析过程使用同一模型，与论文中每次实验的设置一致。修改配置后需要重新启动进程。
 
 > 由于 VulSolver 目前基于 Claude Code SDK 搭建必要的 agents，请确保你的 `base_url` 支持 Anthropic 的接口格式。
 
@@ -187,3 +187,7 @@ python3 -m path_verify.verify ./examples/sast_paths ./examples/sast_paths/potent
 ```
 
 该示例直接导入候选路径并读取匹配的 Java 源码，不调用 `path_explore`，也不需要启动 Java 应用；验证仍然需要调用配置的 LLM。可通过包含目录部分的路径指定输出文件，例如 `-o ./results/example_verified.json`；去掉 `--no-tui` 则使用 Textual 界面。
+
+# 开发说明
+
+离线检查方法以及配置、缓存和重试行为见[开发说明](docs/DEVELOPMENT.md)。

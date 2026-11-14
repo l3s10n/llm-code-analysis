@@ -54,7 +54,7 @@ decision_llm:
   model: "model_name_for_the_complex_decision_model"
 ```
 
-`decision_llm` is optional and is only used for complex logic decisions. If it is left empty, VulSolver will use the `llm` configuration everywhere.
+`decision_llm` is optional. When all three of its fields are populated, it is used for the final exploitability decision; otherwise, that stage falls back to `llm`. Leave it unconfigured to use the same model throughout analysis, as in each experiment reported in the paper. Restart the process after changing configuration.
 
 > Since VulSolver is currently built on the Claude Code SDK for agent orchestration, please ensure your `base_url` supports the Anthropic API format.
 
@@ -187,3 +187,7 @@ python3 -m path_verify.verify ./examples/sast_paths ./examples/sast_paths/potent
 ```
 
 It imports the candidate path and reads the matching Java source directly, without invoking `path_explore` or requiring a running Java application. Verification still calls the configured LLM. To choose the output file, add an output path with a directory component, such as `-o ./results/example_verified.json`; omit `--no-tui` to use the Textual frontend.
+
+# Development
+
+See the [development notes](docs/DEVELOPMENT.md) for offline checks and configuration, cache, and retry behavior.

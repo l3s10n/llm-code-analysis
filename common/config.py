@@ -1,8 +1,9 @@
 """
 Configuration module for VulSolver.
 
-Reads the project config.yaml by default, or the path selected through the
-GOLD_MINER_CONFIG environment variable, and provides dot-notation key access.
+Reads the project config.yaml by default, or the path selected through
+CONFIG_ENV_VAR, and provides dot-notation key access. The parsed configuration
+is cached on first access for the lifetime of the process.
 """
 
 import os
@@ -28,7 +29,11 @@ CONFIG_ENV_VAR = "GOLD_MINER_CONFIG"
 
 
 def get_config_path() -> Path:
-    """Return the effective configuration file path."""
+    """Resolve an override path, or use config.yaml beside the project packages.
+
+    Override paths expand ``~`` and resolve relative to the working directory;
+    the default path is anchored to this module, not the working directory.
+    """
     configured_path = os.environ.get(CONFIG_ENV_VAR)
     if configured_path:
         return Path(configured_path).expanduser().resolve()
@@ -63,17 +68,22 @@ def _load_config_file() -> dict:
 
 def load_config(key: Optional[str] = None) -> Any:
     """
-    Get configuration value by key.
+    Get a configuration value by key, loading the file only on first access.
+
+    Later lookups reuse the same parsed dictionary. Restart the process after
+    editing the configuration or changing the configuration path.
 
     Args:
         key: Configuration key using dot notation (e.g., "llm.model").
              If None, returns the entire config dict.
 
     Returns:
-        Any: Configuration value for the given key, or entire config dict if key is None.
+        Any: Configuration value for the given key, or the cached config dict
+        if key is None. Missing optional keys and optional null or blank-string
+        values return None.
 
     Raises:
-        SystemExit: If the specified key is not found in configuration.
+        SystemExit: If a required key or the configuration file is missing.
     """
     global _config
 

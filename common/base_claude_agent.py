@@ -4,6 +4,9 @@ Base Claude Agent module for VulSolver.
 Provides a wrapper around Claude Agent SDK for executing AI-powered analysis tasks.
 Supports streaming output via callback function, result caching, timeout handling,
 and automatic retry on failure.
+
+Default model settings are read at import time. Disk cache paths are relative
+to the working directory; model responses are cached separately from logs.
 """
 
 import asyncio
@@ -199,7 +202,11 @@ def _generate_cache_key(
     allowed_tools: List[str],
 ) -> str:
     """
-    Generate a unique cache key based on the input parameters.
+    Hash the absolute working directory, prompts, tools, and active model.
+
+    Tool ordering does not affect the key. Target-file contents are not hashed
+    independently, so changing a checkout may require invalidating old results
+    even when the prompt text stays the same.
 
     Args:
         cwd: Working directory for the agent.
@@ -252,7 +259,8 @@ def _load_cache(cache_key: str) -> Optional[str]:
         cache_key: The SHA256 hash key.
 
     Returns:
-        The cached result string, or None if cache doesn't exist.
+        The stored result, or None when the cache is missing, unreadable,
+        malformed, or has no result field.
     """
     cache_file = _get_cache_file_path(cache_key)
 
@@ -418,9 +426,12 @@ def base_claude_agent(
     Execute a Claude agent with retry logic and timeout handling.
 
     This function wraps _execute_with_timeout with:
-    1. Timeout enforcement - kills agents that exceed configured timeout
-    2. Result validation - retries if result is None or too short (< 10 chars)
-    3. Configurable retry attempts from config.yaml
+    1. A configured timeout for each execution attempt
+    2. Validation of minimum output length and an optional structural validator
+    3. One initial attempt followed by up to agent.max_retries retries
+
+    Only the initial attempt may read from the disk cache. Retry attempts bypass
+    cached output, and successful results are saved only after validation.
 
     Args:
         cwd: Working directory for the agent to operate in.
